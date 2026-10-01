@@ -1,0 +1,6 @@
+# BEGIN symproject runtime uv
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+# END symproject runtime uv

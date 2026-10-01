@@ -1,0 +1,114 @@
+# Copyright (c) 2026, Nathaniel T. Berry
+# Licensed under the Apache License, Version 2.0.
+#
+# Source of truth for shapes, runtimes, org overlays, and the paper stub.
+# Do not hardcode those ids in the scaffolder (src/).
+
+version: 1
+
+kit:
+  name: symproject
+  description: Scaffold a research project (paper line, shared library, results)
+
+defaults:
+  shape: paper-line
+  runtime: uv
+  org: none
+
+presets:
+  csymd:
+    description: cSYMd lab paper line
+    shape: paper-line
+    runtime: uv
+    org: csymd
+
+shapes:
+  paper-line:
+    description: Papers, shared src, scripts, data pointers, gitignored results
+    vars:
+      LAB_LINE: ""
+      ISSUE_LINE: "Track each paper in whatever tracker you already use."
+      RUNTIME_NOTE: ""
+    dirs:
+      - data/samples
+      - papers
+      - results
+      - scripts
+      - src/__PACKAGE__
+      - tests
+    keep:
+      - data/samples/.gitkeep
+    files:
+      - src: shapes/paper-line/README.md.tpl
+        dest: README.md
+      - src: shapes/paper-line/CONTRIBUTING.md.tpl
+        dest: CONTRIBUTING.md
+      - src: shapes/paper-line/AGENTS.md.tpl
+        dest: AGENTS.md
+      - src: shapes/paper-line/gitignore.tpl
+        dest: .gitignore
+      - src: shapes/paper-line/data/README.md.tpl
+        dest: data/README.md
+      - src: shapes/paper-line/papers/README.md.tpl
+        dest: papers/README.md
+      - src: shapes/paper-line/results/README.md.tpl
+        dest: results/README.md
+      - src: shapes/paper-line/scripts/README.md.tpl
+        dest: scripts/README.md
+      - src: shapes/paper-line/tests/README.md.tpl
+        dest: tests/README.md
+      - src: shapes/paper-line/src/README.md.tpl
+        dest: src/__PACKAGE__/README.md
+      - src: shapes/paper-line/src/__init__.py.tpl
+        dest: src/__PACKAGE__/__init__.py
+
+runtimes:
+  none:
+    description: No language runtime (no pyproject.toml)
+  uv:
+    description: Python via uv (src layout, pytest extra, uv.lock when uv is on PATH)
+    vars:
+      RUNTIME_NOTE: |
+        ## Run
+
+        ```bash
+        uv sync --extra dev
+        uv run pytest
+        ```
+    files:
+      - src: runtimes/uv/pyproject.toml.tpl
+        dest: pyproject.toml
+    gitignore_append: runtimes/uv/gitignore.fragment
+
+orgs:
+  none:
+    description: Lab-neutral paper line
+  csymd:
+    description: cSYMd lab (csymd.com, GitHub org csymd)
+    vars:
+      GITHUB_ORG: csymd
+      LAB_URL: https://csymd.com
+      LAB_NAME: cSYMd
+      LAB_LINE: "Lab: [cSYMd](https://csymd.com)."
+      ISSUE_LINE: "Sequence is issue-driven. Add a new paper as its own issue. Do not nest papers under a single tracking issue. Use blocked-by for order."
+
+paper:
+  description: One working paper under papers/<slug>/
+  dirs:
+    - papers/__SLUG__
+    - papers/__SLUG__/notes
+    - papers/__SLUG__/analysis
+    - results/__SLUG__
+  keep:
+    - results/__SLUG__/.gitkeep
+  files:
+    - src: paper/README.md.tpl
+      dest: papers/__SLUG__/README.md
+    - src: paper/manuscript.md.tpl
+      dest: papers/__SLUG__/manuscript.md
+    - src: paper/notes/claims.md.tpl
+      dest: papers/__SLUG__/notes/claims.md
+    - src: paper/notes/pipeline.md.tpl
+      dest: papers/__SLUG__/notes/pipeline.md
+    - src: paper/analysis/README.md.tpl
+      dest: papers/__SLUG__/analysis/README.md

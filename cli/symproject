@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, Nathaniel T. Berry
+# Licensed under the Apache License, Version 2.0.
+
+# Build and exec the Rust binary. Inside this checkout the binary reads
+# catalog.yaml and templates/ from the tree (see src/assets.rs).
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$ROOT/target/debug/symproject"
+if [[ ! -x "$BIN" ]]; then
+  cargo build --manifest-path "$ROOT/Cargo.toml" --quiet
+fi
+exec "$BIN" "$@"

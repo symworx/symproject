@@ -1,0 +1,28 @@
+# Manual: cargo +nightly fmt
+# Check:  cargo +nightly fmt -- --check
+
+edition = "2024"
+max_width = 120
+
+use_small_heuristics = "Default"
+
+# Group std vs external vs crate; one `use` per crate.
+# On stable these may be treated as "Preserve".
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+
+# One item per line inside `use` blocks (better diffs).
+# Does not apply to other arrays (e.g. string slices).
+imports_layout = "Vertical"
+
+reorder_imports = true
+reorder_modules = true
+
+# Be conservative with things that often contain intentional formatting
+format_strings = false
+format_code_in_doc_comments = false
+wrap_comments = false
+
+# Minor polish checks
+normalize_comments = true
+trailing_comma = "Vertical"
