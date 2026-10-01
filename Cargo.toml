@@ -9,7 +9,7 @@ rust-version = "1.85"
 authors = ["Nathaniel T. Berry"]
 license = "Apache-2.0"
 description = "Scaffold a research-project repository: paper line, shared library, and results"
-repository = "https://github.com/csymd/symproject"
+repository = "https://github.com/symworx/symproject"
 readme = "README.md"
 
 [[bin]]
