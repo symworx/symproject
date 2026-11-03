@@ -176,13 +176,15 @@ impl Catalog {
         for (name, spec) in &c.orgs {
             lines.push(format!("  {name:<12} {}", spec.description));
         }
-        lines.push(String::new());
-        lines.push("Presets:".to_string());
-        for (name, spec) in &c.presets {
-            lines.push(format!(
-                "  {name:<12} shape={} runtime={} org={}  {}",
-                spec.shape, spec.runtime, spec.org, spec.description
-            ));
+        if !c.presets.is_empty() {
+            lines.push(String::new());
+            lines.push("Presets:".to_string());
+            for (name, spec) in &c.presets {
+                lines.push(format!(
+                    "  {name:<12} shape={} runtime={} org={}  {}",
+                    spec.shape, spec.runtime, spec.org, spec.description
+                ));
+            }
         }
         lines.push(String::new());
         lines.push("Paper:".to_string());
@@ -255,20 +257,7 @@ impl Catalog {
         if !github_org.is_empty() {
             vars.insert("GITHUB_ORG".to_string(), github_org.to_string());
         }
-        let ghorg = vars.get("GITHUB_ORG").cloned().unwrap_or_default();
-        if !ghorg.is_empty() {
-            vars.insert(
-                "CLONE_SNIPPET".to_string(),
-                format!("git clone https://github.com/{ghorg}/{}.git", req.project_name),
-            );
-            vars.insert(
-                "REPO_WEB".to_string(),
-                format!("https://github.com/{ghorg}/{}", req.project_name),
-            );
-        } else {
-            vars.insert("CLONE_SNIPPET".to_string(), "git clone <repository-url>".to_string());
-            vars.insert("REPO_WEB".to_string(), "the project repository".to_string());
-        }
+        fill_repo_urls(&mut vars, req.project_name);
 
         Ok(Resolved {
             shape: req.shape.to_string(),
@@ -283,6 +272,23 @@ impl Catalog {
     pub fn paper(&self) -> (Vec<String>, Vec<Item>) {
         merge_files(&[&self.file.paper])
     }
+}
+
+pub fn fill_repo_urls(vars: &mut BTreeMap<String, String>, project_name: &str) {
+    let ghorg = vars.get("GITHUB_ORG").cloned().unwrap_or_default();
+    if ghorg.is_empty() {
+        vars.insert("CLONE_SNIPPET".to_string(), "git clone <repository-url>".to_string());
+        vars.insert("REPO_WEB".to_string(), "the project repository".to_string());
+        return;
+    }
+    vars.insert(
+        "CLONE_SNIPPET".to_string(),
+        format!("git clone https://github.com/{ghorg}/{project_name}.git"),
+    );
+    vars.insert(
+        "REPO_WEB".to_string(),
+        format!("https://github.com/{ghorg}/{project_name}"),
+    );
 }
 
 fn blank_to_none(value: Option<&str>) -> Option<&str> {
@@ -380,21 +386,23 @@ mod tests {
     }
 
     #[test]
-    fn list_names_defaults_and_csymd() {
+    fn list_names_the_default_lab_org() {
         let text = repo_catalog().format_list();
         assert!(text.contains("shape    paper-line"), "{text}");
         assert!(text.contains("runtime  uv"), "{text}");
-        assert!(text.contains("csymd"), "{text}");
+        assert!(text.contains("org      lab"), "{text}");
+        assert!(text.contains("Default lab overlay"), "{text}");
+        assert!(!text.contains("csymd"), "{text}");
         assert!(text.contains("Paper:"), "{text}");
     }
 
     #[test]
-    fn preset_csymd_fills_empty_flags_and_org_vars() {
+    fn default_lab_org_fills_org_vars() {
         let cat = repo_catalog();
-        let (shape, runtime, org) = cat.apply_preset(Some("csymd"), None, None, None).unwrap();
+        let (shape, runtime, org) = cat.apply_preset(None, None, None, None).unwrap();
         assert_eq!(shape, "paper-line");
         assert_eq!(runtime, "uv");
-        assert_eq!(org, "csymd");
+        assert_eq!(org, "lab");
         let resolved = cat
             .resolve(Resolve {
                 shape: &shape,
@@ -404,10 +412,11 @@ mod tests {
                 project_name: "chp-coupling",
             })
             .unwrap();
-        assert_eq!(resolved.vars["GITHUB_ORG"], "csymd");
-        assert_eq!(resolved.vars["LAB_URL"], "https://csymd.com");
-        assert!(resolved.vars["CLONE_SNIPPET"].contains("csymd/chp-coupling"));
-        assert!(resolved.vars["LAB_LINE"].contains("csymd.com"));
+        assert_eq!(resolved.vars["GITHUB_ORG"], "lab-org");
+        assert_eq!(resolved.vars["LAB_URL"], "https://lab.example");
+        assert_eq!(resolved.vars["LAB_NAME"], "Lab name");
+        assert!(resolved.vars["CLONE_SNIPPET"].contains("lab-org/chp-coupling"));
+        assert!(resolved.vars["LAB_LINE"].contains("lab.example"));
         assert!(resolved.vars["RUNTIME_NOTE"].contains("uv sync"));
         assert!(resolved.items.iter().any(|i| i.dest == "pyproject.toml"));
         assert!(resolved.items.iter().any(|i| i.dest == "src/__PACKAGE__/__init__.py"));
@@ -415,12 +424,12 @@ mod tests {
     }
 
     #[test]
-    fn explicit_runtime_overrides_preset() {
+    fn explicit_runtime_keeps_the_default_lab_org() {
         let cat = repo_catalog();
-        let (shape, runtime, org) = cat.apply_preset(Some("csymd"), None, Some("none"), None).unwrap();
+        let (shape, runtime, org) = cat.apply_preset(None, None, Some("none"), None).unwrap();
         assert_eq!(runtime, "none");
         assert_eq!(shape, "paper-line");
-        assert_eq!(org, "csymd");
+        assert_eq!(org, "lab");
         let resolved = cat
             .resolve(Resolve {
                 shape: &shape,
@@ -432,6 +441,61 @@ mod tests {
             .unwrap();
         assert!(!resolved.items.iter().any(|i| i.dest == "pyproject.toml"));
         assert_eq!(resolved.vars["RUNTIME_NOTE"], "");
+        assert!(resolved.vars["LAB_LINE"].contains("lab.example"));
+    }
+
+    #[test]
+    fn preset_fills_empty_flags_and_explicit_flag_wins() {
+        let cat = Catalog::parse(
+            r#"
+version: 1
+kit:
+  name: symproject
+defaults:
+  shape: paper-line
+  runtime: uv
+  org: lab
+presets:
+  demo:
+    description: demo combo
+    shape: paper-line
+    runtime: uv
+    org: lab
+shapes: {}
+runtimes: {}
+orgs: {}
+paper:
+  description: paper
+"#,
+        )
+        .unwrap();
+        let (shape, runtime, org) = cat.apply_preset(Some("demo"), None, None, None).unwrap();
+        assert_eq!(shape, "paper-line");
+        assert_eq!(runtime, "uv");
+        assert_eq!(org, "lab");
+        let (shape, runtime, org) = cat.apply_preset(Some("demo"), None, Some("none"), None).unwrap();
+        assert_eq!(runtime, "none");
+        assert_eq!(shape, "paper-line");
+        assert_eq!(org, "lab");
+        let err = cat.apply_preset(Some("missing"), None, None, None).unwrap_err();
+        assert!(err.to_string().contains("unknown --preset 'missing'"), "{err}");
+        assert!(err.to_string().contains("demo"), "{err}");
+    }
+
+    #[test]
+    fn org_none_leaves_the_lab_line_blank() {
+        let resolved = repo_catalog()
+            .resolve(Resolve {
+                shape: "paper-line",
+                runtime: "none",
+                org: "none",
+                github_org: None,
+                project_name: "demo",
+            })
+            .unwrap();
+        assert_eq!(resolved.vars["LAB_LINE"], "");
+        assert_eq!(resolved.vars["CLONE_SNIPPET"], "git clone <repository-url>");
+        assert_eq!(resolved.vars["REPO_WEB"], "the project repository");
     }
 
     #[test]

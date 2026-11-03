@@ -19,6 +19,7 @@ use std::{
 use crate::{
     assets::is_root,
     catalog::{
+        self,
         Catalog,
         Item,
         ItemKind,
@@ -28,6 +29,7 @@ use crate::{
         Error,
         Result,
     },
+    lab,
 };
 
 const UV_GITIGNORE_MARK: &str = "BEGIN symproject runtime uv";
@@ -42,6 +44,7 @@ pub struct NewProject {
     pub org: Option<String>,
     pub preset: Option<String>,
     pub github_org: Option<String>,
+    pub lab: Option<PathBuf>,
     pub paper: Option<String>,
     pub paper_title: Option<String>,
     pub with_agents: bool,
@@ -88,6 +91,9 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
         req.runtime.as_deref(),
         req.org.as_deref(),
     )?;
+    if req.lab.is_some() && org == "none" {
+        return Err(Error::LabWithNeutralOrg);
+    }
     let resolved = catalog.resolve(Resolve {
         shape: &shape,
         runtime: &runtime,
@@ -97,6 +103,15 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
     })?;
 
     let mut vars = resolved.vars.clone();
+    if let Some(lab_path) = req.lab.as_deref() {
+        let lab_file = lab::load_lab(lab_path)?;
+        lab::overlay_lab(&mut vars, &lab_file, &req.project_name);
+        log(&format!("Lab file: {}", lab_path.display()));
+    }
+    if let Some(ghorg) = req.github_org.as_deref().filter(|value| !value.is_empty()) {
+        vars.insert("GITHUB_ORG".to_string(), ghorg.to_string());
+        catalog::fill_repo_urls(&mut vars, &req.project_name);
+    }
     vars.insert("PROJECT_NAME".to_string(), req.project_name.clone());
     vars.insert("PROJECT_TITLE".to_string(), req.title.clone());
     vars.insert("PACKAGE".to_string(), package);
@@ -114,6 +129,7 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
     }
 
     let (created, skipped) = apply_tree(&template_dir, &req.outdir, &resolved.dirs, &resolved.items, &vars)?;
+    write_project_sidecar(&req.outdir, &req.project_name, &resolved.org, &vars)?;
 
     if resolved.runtime == "uv" {
         let mut created = created;
@@ -134,8 +150,84 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
     install_agents(req)?;
 
     log("Next: edit the aim in README.md, then add papers with `symproject paper <slug> --title \"...\"`.");
+    log(&format!("Lab template: {}", root.join("templates/lab.yml").display()));
     log("Work on nb/<slug>. main holds the settled layout.");
     log("Do not commit data/private/, data/open/, or generated files under results/.");
+    Ok(())
+}
+
+pub fn set_lab(outdir: &Path, lab_path: &Path, dry_run: bool) -> Result<()> {
+    if outdir.exists() && is_root(outdir) {
+        let out_canon = fs::canonicalize(outdir).unwrap_or_else(|_| outdir.to_path_buf());
+        return Err(Error::KitRoot(out_canon));
+    }
+    let sidecar_path = outdir.join(".symproject.yaml");
+    let sidecar = lab::load_sidecar(&sidecar_path)?;
+    if !valid_slug(&sidecar.project_name) {
+        return Err(Error::InvalidProjectName(sidecar.project_name));
+    }
+    for file in &sidecar.files {
+        check_rel(file)?;
+    }
+    let lab_file = lab::load_lab(lab_path)?;
+    let mut current = BTreeMap::new();
+    for file in &sidecar.files {
+        let path = outdir.join(file);
+        if !path.is_file() {
+            return Err(Error::MissingProjectFile(path));
+        }
+        current.insert(file.clone(), fs::read_to_string(path)?);
+    }
+    let plan = lab::plan_lab(&current, &sidecar, &lab_file)?;
+    let label = if dry_run { "set-lab (dry-run)" } else { "set-lab" };
+    log(&format!("{label}: {}", sidecar.project_name));
+    for note in &plan.notes {
+        log(note);
+    }
+    for warning in &plan.warnings {
+        warn(warning);
+    }
+    let files_dirty = plan.files.iter().any(|(name, text)| current.get(name) != Some(text));
+    let holdings_dirty = plan.holdings != sidecar.holdings;
+    if !files_dirty && !holdings_dirty {
+        if plan.warnings.is_empty() {
+            log("lab holdings already match");
+        }
+        return Ok(());
+    }
+    if dry_run {
+        return Ok(());
+    }
+    for (file, text) in &plan.files {
+        if current.get(file) != Some(text) {
+            fs::write(outdir.join(file), text)?;
+        }
+    }
+    if holdings_dirty {
+        let mut updated = sidecar;
+        updated.holdings = plan.holdings;
+        lab::write_sidecar(&sidecar_path, &updated)?;
+    }
+    Ok(())
+}
+
+fn write_project_sidecar(outdir: &Path, project_name: &str, org: &str, vars: &BTreeMap<String, String>) -> Result<()> {
+    let path = outdir.join(".symproject.yaml");
+    if path.exists() {
+        log("skip (exists): .symproject.yaml");
+        return Ok(());
+    }
+    lab::write_sidecar(
+        &path,
+        &lab::Sidecar {
+            version: 1,
+            project_name: project_name.to_string(),
+            org: org.to_string(),
+            holdings: lab::holdings_from_vars(vars),
+            files: lab::PROJECT_FILES.iter().map(|name| (*name).to_string()).collect(),
+        },
+    )?;
+    log("created: .symproject.yaml");
     Ok(())
 }
 
@@ -498,6 +590,7 @@ mod tests {
             org: None,
             preset: None,
             github_org: None,
+            lab: None,
             paper: None,
             paper_title: None,
             with_agents: false,
@@ -552,7 +645,9 @@ mod tests {
         assert_eq!(String::from_utf8(branch.stdout).unwrap().trim(), "main");
         let readme = fs::read_to_string(out.join("README.md")).unwrap();
         assert!(readme.contains("Demo line"));
+        assert!(readme.contains("lab.example"));
         assert!(!readme.contains("__PROJECT_TITLE__"));
+        assert!(out.join(".symproject.yaml").is_file());
         fs::write(out.join("README.md"), "keep-me\n").unwrap();
         scaffold(&kit(), &new_req(out.clone(), "demo-study", "none")).unwrap();
         assert_eq!(fs::read_to_string(out.join("README.md")).unwrap(), "keep-me\n");
@@ -595,5 +690,202 @@ mod tests {
             scaffold(&kit(), &req).unwrap_err(),
             Error::InvalidPackageName(_)
         ));
+    }
+
+    fn write_lab(dir: &Path, github_org: &str, lab_name: &str, lab_url: &str, issue: &str) -> PathBuf {
+        let path = dir.join(format!("{github_org}.yml"));
+        let text = format!(
+            "version: 1\ngithub_org: {github_org}\nlab_name: \"{lab_name}\"\nlab_url: {lab_url}\nissue_line: \"{issue}\"\n"
+        );
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn set_lab_replaces_holdings_and_a_second_file_replaces_them_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("demo-study");
+        scaffold(&kit(), &new_req(out.clone(), "demo-study", "none")).unwrap();
+        add_paper(&kit(), &out, "multirate-fusion", "Multirate fusion").unwrap();
+        let claims = fs::read_to_string(out.join("papers/multirate-fusion/notes/claims.md")).unwrap();
+        fs::write(out.join("README.md"), {
+            let mut text = fs::read_to_string(out.join("README.md")).unwrap();
+            text.push_str("keep-me\n");
+            text
+        })
+        .unwrap();
+
+        let first = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        let before = fs::read_to_string(out.join("README.md")).unwrap();
+        set_lab(&out, &first, true).unwrap();
+        assert_eq!(fs::read_to_string(out.join("README.md")).unwrap(), before);
+
+        set_lab(&out, &first, false).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(readme.contains("Lab: [Other Lab](https://other.example)."), "{readme}");
+        assert!(
+            readme.contains("git clone https://github.com/other-org/demo-study.git"),
+            "{readme}"
+        );
+        assert!(readme.contains("Tickets live in the lab tracker."), "{readme}");
+        assert!(readme.contains("keep-me"), "{readme}");
+        assert!(readme.contains("Demo line"), "{readme}");
+        assert!(!readme.contains("lab.example"), "{readme}");
+        let contributing = fs::read_to_string(out.join("CONTRIBUTING.md")).unwrap();
+        assert!(
+            contributing.contains("Tickets live in the lab tracker."),
+            "{contributing}"
+        );
+        assert_eq!(
+            fs::read_to_string(out.join("papers/multirate-fusion/notes/claims.md")).unwrap(),
+            claims
+        );
+
+        set_lab(&out, &first, false).unwrap();
+        assert_eq!(fs::read_to_string(out.join("README.md")).unwrap(), readme);
+
+        let second = write_lab(
+            tmp.path(),
+            "third-org",
+            "Third Lab",
+            "https://third.example",
+            "Use the lab board.",
+        );
+        set_lab(&out, &second, false).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(readme.contains("github.com/third-org/demo-study"), "{readme}");
+        assert!(readme.contains("Lab: [Third Lab](https://third.example)."), "{readme}");
+        assert!(!readme.contains("other-org"), "{readme}");
+        assert!(readme.contains("keep-me"), "{readme}");
+    }
+
+    #[test]
+    fn set_lab_leaves_a_missing_holding_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("demo-study");
+        scaffold(&kit(), &new_req(out.clone(), "demo-study", "none")).unwrap();
+        let mut readme = fs::read_to_string(out.join("README.md")).unwrap();
+        let old = "Lab: [Lab name](https://lab.example).";
+        assert!(readme.contains(old), "{readme}");
+        readme = readme.replace(old, "Edited lab sentence for this repo.");
+        fs::write(out.join("README.md"), &readme).unwrap();
+        let lab_file = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        set_lab(&out, &lab_file, false).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(readme.contains("Edited lab sentence for this repo."), "{readme}");
+        assert!(!readme.contains("other.example"), "{readme}");
+        assert!(readme.contains("github.com/other-org/demo-study"), "{readme}");
+        let sidecar = fs::read_to_string(out.join(".symproject.yaml")).unwrap();
+        assert!(sidecar.contains("https://lab.example"), "{sidecar}");
+        assert!(sidecar.contains("https://github.com/other-org/demo-study"), "{sidecar}");
+    }
+
+    #[test]
+    fn org_none_refuses_set_lab() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("neutral");
+        let mut req = new_req(out.clone(), "neutral", "none");
+        req.org = Some("none".to_string());
+        scaffold(&kit(), &req).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(!readme.contains("lab.example"), "{readme}");
+        let lab_file = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        let err = set_lab(&out, &lab_file, false).unwrap_err();
+        assert!(err.to_string().contains("no replaceable lab line"), "{err}");
+    }
+
+    #[test]
+    fn new_lab_file_stamps_the_first_write_and_a_rerun_keeps_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("stamped");
+        let first = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        let mut req = new_req(out.clone(), "stamped", "none");
+        req.lab = Some(first);
+        scaffold(&kit(), &req).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(readme.contains("https://other.example"), "{readme}");
+        assert!(readme.contains("github.com/other-org/stamped"), "{readme}");
+
+        let second = write_lab(
+            tmp.path(),
+            "third-org",
+            "Third Lab",
+            "https://third.example",
+            "Use the lab board.",
+        );
+        req.lab = Some(second);
+        scaffold(&kit(), &req).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(readme.contains("https://other.example"), "{readme}");
+        assert!(!readme.contains("third-org"), "{readme}");
+    }
+
+    #[test]
+    fn github_org_flag_overrides_the_lab_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("flagged");
+        let lab_file = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        let mut req = new_req(out.clone(), "flagged", "none");
+        req.lab = Some(lab_file);
+        req.github_org = Some("flag-org".to_string());
+        scaffold(&kit(), &req).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        assert!(readme.contains("github.com/flag-org/flagged"), "{readme}");
+        assert!(readme.contains("https://other.example"), "{readme}");
+        assert!(!readme.contains("other-org"), "{readme}");
+    }
+
+    #[test]
+    fn lab_file_with_org_none_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lab_file = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        let mut req = new_req(tmp.path().join("nope"), "nope", "none");
+        req.org = Some("none".to_string());
+        req.lab = Some(lab_file);
+        let err = scaffold(&kit(), &req).unwrap_err();
+        assert!(err.to_string().contains("--org none"), "{err}");
+        assert!(!tmp.path().join("nope").exists());
+    }
+
+    #[test]
+    fn set_lab_refuses_the_kit_root() {
+        let err = set_lab(&kit(), &kit().join("templates/lab.yml"), false).unwrap_err();
+        assert!(err.to_string().contains("refusing to write"), "{err}");
     }
 }

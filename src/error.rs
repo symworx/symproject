@@ -39,6 +39,22 @@ pub enum Error {
     KitRoot(PathBuf),
     #[error("missing template: {0}")]
     MissingTemplate(String),
+    #[error("lab file not found: {0}")]
+    LabMissing(PathBuf),
+    #[error("{path}: {message}")]
+    LabInvalid { path: PathBuf, message: String },
+    #[error("--lab cannot be combined with --org none")]
+    LabWithNeutralOrg,
+    #[error("project has no .symproject.yaml ({0})")]
+    SidecarMissing(PathBuf),
+    #[error(".symproject.yaml: {0}")]
+    SidecarInvalid(String),
+    #[error("missing project file: {0}")]
+    MissingProjectFile(PathBuf),
+    #[error("no replaceable lab line (org is '{0}')")]
+    OrgNotReplaceable(String),
+    #[error("refusing to replace {0}: value must be at least 8 characters and not only the project name")]
+    UnsafeHolding(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("catalog.yaml: {0}")]

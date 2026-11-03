@@ -6,4 +6,5 @@
 pub mod assets;
 pub mod catalog;
 pub mod error;
+pub mod lab;
 pub mod scaffold;

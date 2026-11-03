@@ -100,8 +100,10 @@ fn ensure_embedded() -> Result<PathBuf> {
 }
 
 fn extract_embedded(dest: &Path) -> Result<()> {
-    fs::create_dir_all(dest)?;
-    EMBEDDED_TEMPLATES.extract(dest.join("templates"))?;
+    let templates = dest.join("templates");
+    // include_dir writes root files without creating `templates/` first.
+    fs::create_dir_all(&templates)?;
+    EMBEDDED_TEMPLATES.extract(&templates)?;
     fs::write(dest.join("catalog.yaml"), EMBEDDED_CATALOG)?;
     Ok(())
 }
@@ -109,6 +111,24 @@ fn extract_embedded(dest: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_embedded_has_no_lab_brand(dir: &Path) {
+        let mut pending = vec![dir.to_path_buf()];
+        while let Some(current) = pending.pop() {
+            for entry in fs::read_dir(&current).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                let bytes = fs::read(&path).unwrap();
+                let Ok(text) = String::from_utf8(bytes) else {
+                    continue;
+                };
+                assert!(!text.to_lowercase().contains("csymd"), "{}", path.display());
+            }
+        }
+    }
 
     #[test]
     fn embedded_extract_is_root_and_keeps_paper_templates() {
@@ -119,5 +139,7 @@ mod tests {
         let claims = dir.path().join("templates/paper/notes/claims.md.tpl");
         assert!(readme.is_file(), "missing {}", readme.display());
         assert!(claims.is_file(), "missing {}", claims.display());
+        assert!(dir.path().join("templates/lab.yml").is_file());
+        assert_embedded_has_no_lab_brand(dir.path());
     }
 }

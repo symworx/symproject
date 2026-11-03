@@ -1,8 +1,8 @@
 # Copyright (c) 2026, Nathaniel T. Berry
 # Licensed under the Apache License, Version 2.0.
 #
-# Source of truth for shapes, runtimes, org overlays, and the paper stub.
-# Do not hardcode those ids in the scaffolder (src/).
+# Source of truth for shapes, runtimes, the default lab org, and the paper stub.
+# Copy templates/lab.yml for a real lab. Do not hardcode those ids in the scaffolder (src/).
 
 version: 1
 
@@ -13,14 +13,7 @@ kit:
 defaults:
   shape: paper-line
   runtime: uv
-  org: none
-
-presets:
-  csymd:
-    description: cSYMd lab paper line
-    shape: paper-line
-    runtime: uv
-    org: csymd
+  org: lab
 
 shapes:
   paper-line:
@@ -83,14 +76,14 @@ runtimes:
 orgs:
   none:
     description: Lab-neutral paper line
-  csymd:
-    description: cSYMd lab (csymd.com, GitHub org csymd)
+  lab:
+    description: "Default lab overlay. Replace with `symproject set-lab`."
     vars:
-      GITHUB_ORG: csymd
-      LAB_URL: https://csymd.com
-      LAB_NAME: cSYMd
-      LAB_LINE: "Lab: [cSYMd](https://csymd.com)."
-      ISSUE_LINE: "Sequence is issue-driven. Add a new paper as its own issue. Do not nest papers under a single tracking issue. Use blocked-by for order."
+      GITHUB_ORG: lab-org
+      LAB_URL: https://lab.example
+      LAB_NAME: Lab name
+      LAB_LINE: "Lab: [Lab name](https://lab.example)."
+      ISSUE_LINE: "Track each paper in whatever tracker you already use."
 
 paper:
   description: One working paper under papers/<slug>/

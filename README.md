@@ -21,11 +21,15 @@ cargo install --locked --path .
   --title "Demo study" \
   --no-agents
 
-# cSYMd lab overlay (paper line + uv + github.com/csymd)
+# copy the lab template, edit the copy, then restamp a project
+cp templates/lab.yml lab.yml
+./cli/symproject set-lab lab.yml demo-study
+
+# stamp a lab while scaffolding
 ./cli/symproject new chp-coupling \
   --title "CHP coupling" \
   --package coupling \
-  --preset csymd
+  --lab lab.yml
 
 # add one paper to an existing project
 cd demo-study
@@ -45,23 +49,27 @@ No `--scaffold` and no `--docs`. Layout is this tool's job. `--docs` would add `
 
 ## Catalog
 
-`catalog.yaml` is the source of truth. Do not hardcode shape, runtime, or org ids in the scaffolder.
+`catalog.yaml` is the source of truth for shape, runtime, and the default org. Do not hardcode those ids in the scaffolder. Real lab names belong in a copy of `templates/lab.yml`.
 
 | Flag | Default | Meaning |
 |:--|:--|:--|
 | `--shape` | `paper-line` | `papers/`, `src/<package>/`, `scripts/`, `data/`, `results/` |
 | `--runtime` | `uv` | `uv` writes `pyproject.toml` and `uv.lock` when `uv` is on `PATH`. `none` skips both |
-| `--org` | `none` | `csymd` sets the lab link and GitHub org `csymd` |
-| `--preset` | (none) | `csymd` = paper-line + uv + csymd. Other flags override |
-| `--github-org` | empty | Clone URLs. `csymd` defaults to `csymd` |
+| `--org` | `lab` | `lab` writes a replaceable lab line and clone URL. `none` leaves the lab line blank |
+| `--preset` | (none) | Named combo of shape, runtime, and org. Other flags override |
+| `--github-org` | empty | Clone URLs. Overrides `--lab` and the org |
+| `--lab` | (none) | `lab.yml` overlay on `new` |
 | `--paper` | off | Also write one paper stub during `new` |
 | `--package` | slug with `-` → `_` | Directory under `src/` |
 
-Later layers override the same destination: shape, then runtime, then org.
+Later layers override the same destination: shape, then runtime, then org. `--lab` overrides the org vars. `--github-org` overrides the GitHub org from the lab file.
+
+`symproject set-lab lab.yml [project]` replaces the recorded lab line, issue line, and clone URL. It reads `.symproject.yaml` and rewrites `README.md` and `CONTRIBUTING.md`. `--dry-run` prints the replacements and writes nothing. `new` leaves files that already exist.
 
 ## What it writes
 
 - `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.gitignore`
+- `.symproject.yaml` records the lab holdings `set-lab` replaces
 - `papers/README.md`, `results/README.md`, `data/README.md`, `data/samples/.gitkeep`
 - `scripts/README.md`, `tests/README.md`
 - `src/<package>/__init__.py` and a short README

@@ -17,7 +17,10 @@ trap 'rm -rf "$TMP"' EXIT
 "$CLI" help >/dev/null
 "$CLI" -h >/dev/null
 "$CLI" list | grep -q 'shape    paper-line' || fail "list defaults"
-"$CLI" list | grep -q 'csymd' || fail "list csymd"
+"$CLI" list | grep -q 'org      lab' || fail "list default org"
+"$CLI" list | grep -q 'templates/lab.yml' || fail "list lab template"
+if "$CLI" list | grep -q 'csymd'; then fail "list names a lab"; fi
+if grep -a -q 'csymd' "$ROOT/target/debug/symproject"; then fail "binary embeds a lab name"; fi
 
 if "$CLI" new smoke-bad "$TMP/bad" >/dev/null 2>&1; then
   fail "new without --title must fail"
@@ -44,7 +47,9 @@ git -C "$T1" branch --show-current | grep -qx main || fail "default branch main"
 [[ ! -e "$T1/docs" ]] || fail "must not write docs/"
 [[ ! -e "$T1/pyproject.toml" ]] || fail "runtime none must not write pyproject.toml"
 grep -q "Demo study" "$T1/README.md" || fail "title substitution"
-if grep -q "csymd.com" "$T1/README.md"; then fail "generic README must not mention csymd.com"; fi
+grep -q "lab.example" "$T1/README.md" || fail "default lab holding"
+[[ -f "$T1/.symproject.yaml" ]] || fail "sidecar"
+if grep -q "csymd" "$T1/README.md"; then fail "default README names a lab"; fi
 grep -q 'papers/<slug>/' "$T1/AGENTS.md" || fail "AGENTS paper-line map"
 grep -q 'take precedence' "$T1/AGENTS.md" || fail "AGENTS precedence"
 
@@ -63,6 +68,41 @@ printf '%s\n' "$ROW" | grep -q 'papers/multirate-fusion/' || fail "paper row"
 [[ -f "$T1/papers/multirate-fusion/manuscript.md" ]] || fail "manuscript"
 [[ -f "$T1/results/multirate-fusion/.gitkeep" ]] || fail "results gitkeep"
 grep -q "Multirate fusion predicts GH from HRV" "$T1/papers/multirate-fusion/manuscript.md" || fail "paper title"
+CLAIMS="$T1/papers/multirate-fusion/notes/claims.md"
+CLAIM_SUM="$(cksum "$CLAIMS")"
+
+LAB="$TMP/lab.yml"
+cat >"$LAB" <<'EOF'
+version: 1
+github_org: other-org
+lab_name: Other Lab
+lab_url: https://other.example
+issue_line: "Tickets live in the lab tracker."
+EOF
+"$CLI" set-lab "$LAB" "$T1" --dry-run
+grep -q "lab.example" "$T1/README.md" || fail "dry-run must leave the default lab"
+"$CLI" set-lab "$LAB" "$T1"
+grep -F -q "Lab: [Other Lab](https://other.example)." "$T1/README.md" || fail "set-lab lab line"
+grep -q "github.com/other-org/demo-study" "$T1/README.md" || fail "set-lab clone URL"
+grep -q "Tickets live in the lab tracker." "$T1/README.md" || fail "set-lab issue in README"
+grep -q "Tickets live in the lab tracker." "$T1/CONTRIBUTING.md" || fail "set-lab issue in CONTRIBUTING"
+grep -q "keep-me" "$T1/README.md" || fail "set-lab must keep surrounding prose"
+if grep -q "lab.example" "$T1/README.md"; then fail "default holding remains"; fi
+[[ "$(cksum "$CLAIMS")" == "$CLAIM_SUM" ]] || fail "set-lab touched claims"
+"$CLI" set-lab "$LAB" "$T1"
+
+cat >"$TMP/lab-2.yml" <<'EOF'
+version: 1
+github_org: third-org
+lab_name: Third Lab
+lab_url: https://third.example
+issue_line: "Use the lab board."
+EOF
+"$CLI" set-lab "$TMP/lab-2.yml" "$T1"
+grep -q "github.com/third-org/demo-study" "$T1/README.md" || fail "second set-lab"
+grep -F -q "Lab: [Third Lab](https://third.example)." "$T1/README.md" || fail "second lab line"
+if grep -q "other-org" "$T1/README.md"; then fail "first lab remains"; fi
+
 git -C "$T1" check-ignore -q -- "data/private/x.csv" || fail "data/private ignored"
 git -C "$T1" check-ignore -q -- "results/multirate-fusion/fig.png" || fail "results artifact ignored"
 if git -C "$T1" check-ignore -q -- "results/README.md"; then fail "results/README.md must stay tracked"; fi
@@ -90,15 +130,28 @@ if command -v uv >/dev/null 2>&1; then
   [[ -f "$T_UV/uv.lock" ]] || fail "uv.lock"
 fi
 
-T3="$TMP/lab-line"
-"$CLI" new lab-line "$T3" \
-  --title "Lab line" \
-  --preset csymd \
+T_NONE="$TMP/neutral"
+"$CLI" new neutral "$T_NONE" \
+  --title "Neutral line" \
+  --org none \
   --runtime none \
   --no-agents
-grep -q "csymd.com" "$T3/README.md" || fail "csymd lab link"
-grep -q "github.com/csymd/lab-line" "$T3/README.md" || fail "csymd clone URL"
-grep -q "issue-driven" "$T3/README.md" || fail "csymd issue wording"
-[[ ! -e "$T3/pyproject.toml" ]] || fail "runtime override none must skip pyproject"
+if grep -q "lab.example" "$T_NONE/README.md"; then fail "org none must leave the lab line blank"; fi
+if "$CLI" set-lab "$LAB" "$T_NONE" >/dev/null 2>&1; then fail "set-lab must refuse org none"; fi
+
+T_STAMP="$TMP/stamped"
+"$CLI" new stamped "$T_STAMP" \
+  --title "Stamped" \
+  --runtime none \
+  --no-agents \
+  --lab "$LAB"
+grep -q "other.example" "$T_STAMP/README.md" || fail "new --lab"
+"$CLI" new stamped "$T_STAMP" \
+  --title "Stamped" \
+  --runtime none \
+  --no-agents \
+  --lab "$TMP/lab-2.yml"
+grep -q "other.example" "$T_STAMP/README.md" || fail "new rerun must keep the first lab"
+if grep -q "third-org" "$T_STAMP/README.md"; then fail "new rerun restamped the lab"; fi
 
 echo OK
