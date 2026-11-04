@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Nathaniel T. Berry
+# Licensed under the Apache License, Version 2.0.
+
+cff-version: 1.2.0
+message: If you use this software, please cite it using these metadata.
+type: software
+title: symproject
+abstract: >
+  Scaffold a research-project repository:
+  shared library, per-paper analysis, and generated results.
+authors:
+  - family-names: Berry
+    given-names: Nathaniel T.
+version: "0.1.0"
+license: Apache-2.0
+repository-code: "https://github.com/symworx/symproject"
+url: "https://github.com/symworx/symproject"
+keywords:
+  - research software
+  - project scaffold
+  - rust
