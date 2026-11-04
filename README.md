@@ -68,24 +68,51 @@ Later layers override the same destination: shape, then runtime, then org. `--la
 
 ## What it writes
 
-- `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.gitignore`
-- `.symproject.yaml` records the lab holdings `set-lab` replaces
-- `papers/README.md`, `results/README.md`, `data/README.md`, `data/samples/.gitkeep`
-- `scripts/README.md`, `tests/README.md`
-- `src/<package>/__init__.py` and a short README
-- `pyproject.toml` when the runtime is `uv`
-- `git init -b main`
+`new` writes this tree and runs `git init -b main`. `<package>` is `--package`, or the project name with `-` replaced by `_`. `pyproject.toml` is written for `--runtime uv`. `uv.lock` is written when `uv` is on `PATH`. `.symproject.yaml` records the lab holdings `set-lab` replaces.
 
-`symproject paper <slug> --title "..."` adds:
+```text
+<project>/
+├── README.md                 # program aim and the paper-line table
+├── CONTRIBUTING.md
+├── AGENTS.md
+├── .gitignore
+├── .symproject.yaml
+├── pyproject.toml            # runtime uv
+├── papers/
+│   └── README.md             # index of papers/<slug>/
+├── src/<package>/            # shared library for every paper
+│   ├── README.md
+│   └── __init__.py
+├── scripts/                  # repo-wide ingest, not paper analysis
+│   └── README.md
+├── data/                     # README and samples only
+│   ├── README.md
+│   └── samples/
+│       └── .gitkeep
+├── results/                  # generated artifacts, one folder per slug
+│   └── README.md
+└── tests/
+    └── README.md
+```
 
-- `papers/<slug>/README.md`, `manuscript.md`
-- `papers/<slug>/notes/claims.md`, `pipeline.md`
-- `papers/<slug>/analysis/README.md`
-- `results/<slug>/.gitkeep`
+`symproject paper <slug> --title "..."` adds one paper and its results folder. It prints a row for the README table. Create the git branch `nb/<slug>` yourself. The root README stays as written.
 
-It prints a row for the README table. It does not create `nb/<slug>` and it does not rewrite the README.
+```text
+papers/<slug>/
+├── README.md
+├── manuscript.md
+├── notes/
+│   ├── claims.md             # locked methods for this paper
+│   └── pipeline.md
+└── analysis/
+    └── README.md             # purpose, inputs, outputs, rerun
+results/<slug>/
+└── .gitkeep
+```
 
-Generated projects keep restricted extracts and `results/**` gitignored. Program aim stays in the root README. Per-paper truth stays in `papers/<slug>/notes/claims.md`.
+Program aim stays in the root README. Per-paper truth stays in `papers/<slug>/notes/claims.md`. Later papers add another `papers/<slug>/` and reuse `src/<package>/`.
+
+Generated projects gitignore `data/private/`, `data/local/`, `data/open/`, and `results/**`. READMEs and `.gitkeep` under `results/` stay tracked. Those `data/` extract directories are not created.
 
 ## Tests
 
