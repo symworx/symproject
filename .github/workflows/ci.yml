@@ -1,0 +1,67 @@
+# Copyright (c) 2026, Nathaniel T. Berry
+# Licensed under the Apache License, Version 2.0.
+#
+# Day-to-day CI.
+# SymWorx org standard (default branch `worx`).
+# See DEVELOPMENT.md for additional information.
+#
+# Rust gates are the same commands as release.yml:
+# cargo +nightly fmt, cargo clippy, cargo test, and tests/smoke.sh.
+
+name: CI
+
+on:
+  push:
+    branches: [worx, develop]
+  pull_request:
+    branches: [worx, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # Job id is the required-check name. Do not set `name:`.
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust (rustfmt)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Format check (nightly rustfmt)
+        run: cargo +nightly fmt -- --check
+
+  # Job id is the required-check name. Do not set `name:`.
+  rust-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test -- --quiet
+
+      - name: Smoke
+        run: ./tests/smoke.sh

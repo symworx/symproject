@@ -1,0 +1,181 @@
+# Copyright (c) 2026, Nathaniel T. Berry
+# Licensed under the Apache License, Version 2.0.
+#
+# Release validation.
+# SymWorx org standard (default branch `worx`).
+# See DEVELOPMENT.md for additional information.
+#
+# GitHub Flow:
+#   feature/* ──PR──► worx ──tag──► vX.Y.Z
+# Optional freeze: push to release/** then PR back to worx.
+#
+# Validation (meta, fmt, clippy/tests, smoke) runs on:
+#   - PRs into main (legacy freeze PRs during cutover)
+#   - pushes to release/**
+#   - tags v*
+#   - workflow_dispatch (checks only; does not publish)
+#
+# This repository does not publish from the workflow yet.
+# Create tags manually on worx. A later publish job should run only
+# on tags v*, after validation succeeds.
+
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - "release/**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  release-meta:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      is_tag: ${{ steps.meta.outputs.is_tag }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # [package].version in Cargo.toml. The rest of this job is org-standard.
+          PKG_VERSION=$(
+            awk '
+              $0 ~ /^\[package\]/ { in_pkg=1; next }
+              in_pkg && $0 ~ /^\[/ { in_pkg=0 }
+              in_pkg && $0 ~ /^version/ {
+                if (match($0, /"[^"]+"/)) {
+                  print substr($0, RSTART+1, RLENGTH-2)
+                  exit
+                }
+              }
+            ' Cargo.toml
+          )
+          if [[ -z "${PKG_VERSION}" ]]; then
+            echo "::error::Could not read [package] version from Cargo.toml"
+            exit 1
+          fi
+
+          IS_TAG=false
+          IS_PRERELEASE=false
+          TAG_VERSION=""
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            IS_TAG=true
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "${TAG_VERSION}" == *-* ]]; then
+              IS_PRERELEASE=true
+            fi
+          fi
+
+          BRANCH_REF="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          if [[ "${BRANCH_REF}" == release/* ]]; then
+            BRANCH_VERSION="${BRANCH_REF#release/}"
+            BRANCH_VERSION="${BRANCH_VERSION#v}"
+            if [[ "${BRANCH_VERSION}" != "${PKG_VERSION}" ]]; then
+              echo "::error::release branch '${BRANCH_REF}' version (${BRANCH_VERSION}) does not match package version (${PKG_VERSION})"
+              exit 1
+            fi
+          fi
+
+          if [[ "${IS_TAG}" == "true" ]]; then
+            if [[ "${TAG_VERSION}" != "${PKG_VERSION}" ]]; then
+              echo "::error::Tag v${TAG_VERSION} does not match package version ${PKG_VERSION}"
+              exit 1
+            fi
+            # Final releases should land on worx; develop/main remain valid during the rename.
+            if [[ "${IS_PRERELEASE}" != "true" ]]; then
+              trunk=""
+              for b in worx develop main; do
+                git fetch --no-tags origin "$b:refs/remotes/origin/$b" 2>/dev/null || true
+                if git rev-parse --verify "origin/$b" >/dev/null 2>&1; then
+                  trunk=$b
+                  break
+                fi
+              done
+              if [[ -n "${trunk}" ]]; then
+                if git merge-base --is-ancestor HEAD "origin/${trunk}" 2>/dev/null; then
+                  echo "Tag commit is on ${trunk} (or an ancestor of ${trunk})."
+                else
+                  echo "::warning::Tag v${TAG_VERSION} is not an ancestor of ${trunk}. Final releases should be tagged on worx."
+                fi
+              else
+                echo "::warning::No trunk branch (worx/develop/main) found; skipping ancestor check for tag v${TAG_VERSION}."
+              fi
+            fi
+          fi
+
+          if [[ "${IS_TAG}" == "true" || "${BRANCH_REF}" == release/* ]]; then
+            if ! grep -Eq "^## \[${PKG_VERSION}\]" CHANGELOG.md; then
+              echo "::error::CHANGELOG.md missing '## [${PKG_VERSION}]' section for this release"
+              exit 1
+            fi
+          fi
+
+          {
+            echo "version=${PKG_VERSION}"
+            echo "is_tag=${IS_TAG}"
+            echo "is_prerelease=${IS_PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Release metadata: version=${PKG_VERSION} is_tag=${IS_TAG} is_prerelease=${IS_PRERELEASE}"
+
+  # Same cargo commands as ci.yml. Job ids stay `fmt` and `rust-checks` (no `name:`).
+  fmt:
+    runs-on: ubuntu-latest
+    needs: release-meta
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust (rustfmt)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Format check (nightly rustfmt)
+        run: cargo +nightly fmt -- --check
+
+  rust-checks:
+    runs-on: ubuntu-latest
+    needs: release-meta
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test -- --quiet
+
+      - name: Smoke
+        run: ./tests/smoke.sh
