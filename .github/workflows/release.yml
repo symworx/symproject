@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Nathaniel T. Berry
 # Licensed under the Apache License, Version 2.0.
 #
-# Release validation.
+# Release validation + publish.
 # SymWorx org standard (default branch `worx`).
 # See DEVELOPMENT.md for additional information.
 #
@@ -15,9 +15,8 @@
 #   - tags v*
 #   - workflow_dispatch (checks only; does not publish)
 #
-# This repository does not publish from the workflow yet.
-# Create tags manually on worx. A later publish job should run only
-# on tags v*, after validation succeeds.
+# Publish (crates.io) runs only on tags v*, after validation succeeds.
+# Create tags manually on worx.
 
 name: Release
 
@@ -179,3 +178,36 @@ jobs:
 
       - name: Smoke
         run: ./tests/smoke.sh
+
+  release-ready:
+    name: Release checks passed
+    runs-on: ubuntu-latest
+    needs: [release-meta, fmt, rust-checks]
+    if: always()
+    steps:
+      - name: Require validation jobs
+        run: |
+          set -euo pipefail
+          echo "release-meta: ${{ needs.release-meta.result }}"
+          echo "fmt: ${{ needs.fmt.result }}"
+          echo "rust-checks: ${{ needs.rust-checks.result }}"
+          test "${{ needs.release-meta.result }}" = "success"
+          test "${{ needs.fmt.result }}" = "success"
+          test "${{ needs.rust-checks.result }}" = "success"
+          echo "Release validation passed for v${{ needs.release-meta.outputs.version }}"
+
+  publish-crates:
+    name: Publish crates.io
+    runs-on: ubuntu-latest
+    needs: [release-meta, release-ready]
+    if: needs.release-meta.outputs.is_tag == 'true' && needs.release-ready.result == 'success'
+    environment: crates-io
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish symproject
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
