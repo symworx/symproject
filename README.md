@@ -12,13 +12,15 @@ Published on [crates.io](https://crates.io/crates/symproject). The installed bin
 cargo install --locked symproject
 ```
 
-From a clone, `./cli/symproject` builds the debug binary and runs it. In this checkout the binary reads `catalog.yaml` and `templates/` from the tree.
+From this directory, install the binary locally:
 
 ```bash
 cargo install --locked --path .
 ```
 
-The examples below use `./cli/symproject` from a clone. After the crates.io install, run `symproject` with the same arguments.
+That puts `symproject` on `PATH` and embeds the catalog and templates from this checkout. `./cli/symproject` builds the debug binary and runs it without installing. In this checkout that binary reads `catalog.yaml` and `templates/` from the tree.
+
+The examples below use `./cli/symproject` from a clone. After either install, run `symproject` with the same arguments.
 
 ## Quick start
 
