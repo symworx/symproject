@@ -6,11 +6,14 @@ data/private/
 data/local/
 data/open/
 
-# Local catalogs
+# Local catalogs and dumps (schema SQL stays tracked)
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+*.dump
+*.pgdump
+*.sql.gz
 
 # Generated analysis artifacts (keep READMEs and .gitkeep).
 # Directories must stay un-ignored or Git will not re-include files inside them.

@@ -6,11 +6,19 @@ Agent packs come from [symworx/symkit](https://github.com/symworx/symkit). This 
 
 ## Install
 
+Published on [crates.io](https://crates.io/crates/symproject). The installed binary is `symproject`. It uses the catalog and templates embedded at that version.
+
+```bash
+cargo install --locked symproject
+```
+
 From a clone, `./cli/symproject` builds the debug binary and runs it. In this checkout the binary reads `catalog.yaml` and `templates/` from the tree.
 
 ```bash
 cargo install --locked --path .
 ```
+
+The examples below use `./cli/symproject` from a clone. After the crates.io install, run `symproject` with the same arguments.
 
 ## Quick start
 
@@ -45,15 +53,15 @@ If `symkit` is on `PATH`, `new` then runs:
 symkit install <outdir> --harness research --role researcher --yes
 ```
 
-No `--scaffold` and no `--docs`. Layout is this tool's job. `--docs` would add `docs/aims.md` beside `papers/`. If `symkit` is missing, the tree is still written and the install command is printed. `--no-agents` skips the nested install.
+No `--scaffold` and no `--docs`. Layout is this tool's job. `new` writes `docs/design.md`, `docs/funding/`, `docs/methods/`, and `analysis/`. `--docs` would add `docs/aims.md`, which this layout does not use. If `symkit` is missing, the tree is still written and the install command is printed. `--no-agents` skips the nested install.
 
 ## Catalog
 
 `catalog.yaml` is the source of truth for shape, runtime, and the default org. Do not hardcode those ids in the scaffolder. Real lab names belong in a copy of `templates/lab.yml`.
 
 | Flag | Default | Meaning |
-|:--|:--|:--|
-| `--shape` | `paper-line` | `papers/`, `src/<package>/`, `scripts/`, `data/`, `results/` |
+|:-|:--|:----|
+| `--shape` | `paper-line` | `papers/`, `docs/`, `analysis/`, `src/<package>/`, `scripts/`, `data/`, `results/` |
 | `--runtime` | `uv` | `uv` writes `pyproject.toml` and `uv.lock` when `uv` is on `PATH`. `none` skips both |
 | `--org` | `lab` | `lab` writes a replaceable lab line and clone URL. `none` leaves the lab line blank |
 | `--preset` | (none) | Named combo of shape, runtime, and org. Other flags override |
@@ -78,12 +86,21 @@ Later layers override the same destination: shape, then runtime, then org. `--la
 ├── .gitignore
 ├── .symproject.yaml
 ├── pyproject.toml            # runtime uv
+├── docs/
+│   ├── README.md             # idea, funding science, methods
+│   ├── design.md
+│   ├── funding/
+│   │   └── README.md
+│   └── methods/
+│       └── README.md
+├── analysis/
+│   └── README.md             # shared data pipeline
 ├── papers/
 │   └── README.md             # index of papers/<slug>/
 ├── src/<package>/            # shared library for every paper
 │   ├── README.md
 │   └── __init__.py
-├── scripts/                  # repo-wide ingest, not paper analysis
+├── scripts/                  # short entry points
 │   └── README.md
 ├── data/                     # README and samples only
 │   ├── README.md
@@ -110,7 +127,7 @@ results/<slug>/
 └── .gitkeep
 ```
 
-Program aim stays in the root README. Per-paper truth stays in `papers/<slug>/notes/claims.md`. Later papers add another `papers/<slug>/` and reuse `src/<package>/`.
+Program aim stays in the root README. The longer plan stays in `docs/design.md`. Per-paper truth stays in `papers/<slug>/notes/claims.md`, which cites the funding and methods files it locked. Root `analysis/` builds the shared database. Later papers add another `papers/<slug>/` and reuse `src/<package>/` and that database.
 
 Generated projects gitignore `data/private/`, `data/local/`, `data/open/`, and `results/**`. READMEs and `.gitkeep` under `results/` stay tracked. Those `data/` extract directories are not created.
 

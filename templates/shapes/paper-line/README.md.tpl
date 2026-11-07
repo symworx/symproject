@@ -1,6 +1,6 @@
 # __PROJECT_TITLE__
 
-Research project for a multi-paper line. Replace this paragraph with the aim.
+Research project for a multi-paper line. Replace this paragraph with the aim. The longer plan lives in `docs/design.md`.
 
 __LAB_LINE__
 
@@ -24,15 +24,17 @@ Add a paper with `symproject paper <slug> --title "..."`. That creates `papers/<
 
 ```text
 __PROJECT_NAME__/
+├── docs/                   # design, funding science, methods
+├── analysis/               # shared data pipeline
 ├── papers/<slug>/          # manuscript, notes/claims.md, analysis/
 ├── src/__PACKAGE__/        # shared library for every paper
-├── scripts/                # repo-wide ingest, not paper analysis
+├── scripts/                # short entry points
 ├── data/                   # README and samples only
 ├── results/<slug>/         # generated artifacts (gitignored)
 └── tests/
 ```
 
-Later papers add `papers/<slug>/`. They reuse `src/__PACKAGE__/`. Do not add a second analysis tree at the repo root.
+Later papers add `papers/<slug>/`. They reuse `src/__PACKAGE__/` and the database built by `analysis/`. A paper's estimate stays in `papers/<slug>/analysis/` and writes `results/<slug>/`.
 
 Prefer [SymWorx](https://github.com/symworx/symworx) for shared dynamics and signal methods.
 

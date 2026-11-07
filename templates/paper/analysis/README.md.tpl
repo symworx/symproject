@@ -6,7 +6,7 @@
 
 ## Outputs
 
-Writes under `results/__SLUG__/`.
+Writes under `results/__SLUG__/`. The shared database is built by the repository `analysis/` tree.
 
 ## Assumptions
 

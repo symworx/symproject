@@ -9,3 +9,11 @@ Locked methods for this paper. Agents quote this file. If a line is still a plac
 ## Data
 
 ## Decisions
+
+## Plan
+
+Cite the dated file this paper locked.
+
+- Design:
+- Funding:
+- Methods:

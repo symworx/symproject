@@ -632,8 +632,14 @@ mod tests {
         assert!(out.join("data/README.md").is_file());
         assert!(out.join("data/samples/.gitkeep").is_file());
         assert!(out.join("AGENTS.md").is_file());
-        assert!(!out.join("analysis").exists());
-        assert!(!out.join("docs").exists());
+        assert!(out.join("docs/design.md").is_file());
+        assert!(out.join("docs/funding/README.md").is_file());
+        assert!(out.join("docs/methods/README.md").is_file());
+        assert!(out.join("analysis/README.md").is_file());
+        assert!(!out.join("docs/aims.md").exists());
+        let agents = fs::read_to_string(out.join("AGENTS.md")).unwrap();
+        assert!(agents.contains("notes/claims.md"), "{agents}");
+        assert!(agents.contains("Do not add `docs/aims.md`"), "{agents}");
         assert!(!out.join("pyproject.toml").exists());
         let branch = Command::new("git")
             .arg("-C")
@@ -670,6 +676,7 @@ mod tests {
         assert!(out.join("results/multirate-fusion/.gitkeep").is_file());
         let claims = fs::read_to_string(out.join("papers/multirate-fusion/notes/claims.md")).unwrap();
         assert!(claims.contains("Multirate fusion"));
+        assert!(claims.contains("## Plan"), "{claims}");
     }
 
     #[test]

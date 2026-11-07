@@ -420,7 +420,13 @@ mod tests {
         assert!(resolved.vars["RUNTIME_NOTE"].contains("uv sync"));
         assert!(resolved.items.iter().any(|i| i.dest == "pyproject.toml"));
         assert!(resolved.items.iter().any(|i| i.dest == "src/__PACKAGE__/__init__.py"));
-        assert!(!resolved.dirs.iter().any(|d| d == "analysis" || d.starts_with("docs")));
+        assert!(resolved.dirs.iter().any(|d| d == "analysis"));
+        assert!(resolved.dirs.iter().any(|d| d == "docs/funding"));
+        assert!(resolved.dirs.iter().any(|d| d == "docs/methods"));
+        assert!(resolved.items.iter().any(|i| i.dest == "docs/design.md"));
+        assert!(resolved.items.iter().any(|i| i.dest == "docs/README.md"));
+        assert!(resolved.items.iter().any(|i| i.dest == "analysis/README.md"));
+        assert!(!resolved.items.iter().any(|i| i.dest == "docs/aims.md"));
     }
 
     #[test]

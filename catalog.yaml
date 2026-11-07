@@ -17,13 +17,16 @@ defaults:
 
 shapes:
   paper-line:
-    description: Papers, shared src, scripts, data pointers, gitignored results
+    description: Papers, shared pipeline, written design, gitignored results
     vars:
       LAB_LINE: ""
       ISSUE_LINE: "Track each paper in whatever tracker you already use."
       RUNTIME_NOTE: ""
     dirs:
+      - analysis
       - data/samples
+      - docs/funding
+      - docs/methods
       - papers
       - results
       - scripts
@@ -40,6 +43,16 @@ shapes:
         dest: AGENTS.md
       - src: shapes/paper-line/gitignore.tpl
         dest: .gitignore
+      - src: shapes/paper-line/analysis/README.md.tpl
+        dest: analysis/README.md
+      - src: shapes/paper-line/docs/README.md.tpl
+        dest: docs/README.md
+      - src: shapes/paper-line/docs/design.md.tpl
+        dest: docs/design.md
+      - src: shapes/paper-line/docs/funding/README.md.tpl
+        dest: docs/funding/README.md
+      - src: shapes/paper-line/docs/methods/README.md.tpl
+        dest: docs/methods/README.md
       - src: shapes/paper-line/data/README.md.tpl
         dest: data/README.md
       - src: shapes/paper-line/papers/README.md.tpl

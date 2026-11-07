@@ -7,7 +7,7 @@ papers/<slug>/
 ├── README.md
 ├── manuscript.md
 ├── notes/
-│   ├── claims.md       # locked methods; agents quote this
+│   ├── claims.md       # locked for this paper; cites docs/
 │   └── pipeline.md
 └── analysis/
     └── README.md       # purpose, inputs, outputs, assumptions, rerun

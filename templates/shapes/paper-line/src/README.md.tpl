@@ -1,6 +1,6 @@
 # __PACKAGE__
 
-Shared library for every paper in this repo. Paper-specific analysis and manuscript text stay under `papers/<slug>/`.
+Shared library for every paper in this repo. The shared database pipeline lives in `analysis/`. Paper-specific analysis and manuscript text stay under `papers/<slug>/`.
 
 ## Purpose
 
