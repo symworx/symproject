@@ -13,7 +13,7 @@ Trees this tool generates use `main` and `nb/<slug>`. That branch model is for r
 
 `symproject` scaffolds a research-project shape (layout, runtime, identity overlays). Agent packs come from `symkit`. Do not pass `--scaffold` or `--docs` to `symkit` on a tree this tool created.
 
-`catalog.yaml` lists shapes, runtimes, the default `lab` org, and the paper stub. Put a real lab in a copy of `templates/lab.yml`. Do not hardcode lab names in the scaffolder (`src/`).
+`catalog.yaml` lists shapes, runtimes, the default `none` org, and the paper stub. A real lab is a local `lab.yml` from `symproject create lab`. Do not hardcode lab names in the scaffolder (`src/`).
 
 ```bash
 ./cli/symproject list

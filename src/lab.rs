@@ -36,11 +36,13 @@ const HOLDING_FILES: &[(&str, &[&str])] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabFile {
+    pub institution_name: Option<String>,
     pub github_org: String,
     pub lab_name: String,
     pub lab_url: String,
     pub lab_line: Option<String>,
     pub issue_line: Option<String>,
+    pub investigators: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,25 +62,57 @@ pub struct LabPlan {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct LabRaw {
     version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    institution_name: Option<String>,
     github_org: String,
     lab_name: String,
     lab_url: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     lab_line: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     issue_line: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    investigators: Vec<String>,
 }
 
 impl LabFile {
     pub fn rendered_lab_line(&self) -> String {
         match &self.lab_line {
             Some(line) => line.clone(),
-            None => format!("Lab: [{}]({}).", self.lab_name, self.lab_url),
+            None => match &self.institution_name {
+                Some(institution) => format!("Lab: [{}]({}), {institution}.", self.lab_name, self.lab_url),
+                None => format!("Lab: [{}]({}).", self.lab_name, self.lab_url),
+            },
         }
     }
+}
+
+pub fn save_lab(path: &Path, lab: &LabFile) -> Result<()> {
+    let raw = LabRaw {
+        version: 1,
+        institution_name: lab.institution_name.clone(),
+        github_org: lab.github_org.clone(),
+        lab_name: lab.lab_name.clone(),
+        lab_url: lab.lab_url.clone(),
+        lab_line: lab.lab_line.clone(),
+        issue_line: lab.issue_line.clone(),
+        investigators: lab.investigators.clone(),
+    };
+    let body = serde_yaml::to_string(&raw).map_err(|err| Error::LabInvalid {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    let text = format!("# Local lab file. Pass it to `symproject new --lab` or `set-lab`.\n{body}");
+    fs::write(path, text)?;
+    Ok(())
 }
 
 pub fn load_lab(path: &Path) -> Result<LabFile> {
@@ -257,6 +291,10 @@ fn parse_lab(path: &Path, text: &str) -> Result<LabFile> {
             message: format!("unsupported version {} (expected 1)", raw.version),
         });
     }
+    let institution_name = match raw.institution_name {
+        Some(value) => Some(require_line(path, "institution_name", &value)?),
+        None => None,
+    };
     let github_org = require_line(path, "github_org", &raw.github_org)?;
     if !valid_github_org(&github_org) {
         return Err(Error::LabInvalid {
@@ -280,6 +318,23 @@ fn parse_lab(path: &Path, text: &str) -> Result<LabFile> {
         Some(value) => Some(require_line(path, "issue_line", &value)?),
         None => None,
     };
+    let mut investigators = Vec::new();
+    for (index, name) in raw.investigators.into_iter().enumerate() {
+        let name = require_line(path, "investigators", &name).map_err(|err| match err {
+            Error::LabInvalid { path, .. } => Error::LabInvalid {
+                path,
+                message: format!("investigators[{index}] must be a single non-empty line"),
+            },
+            other => other,
+        })?;
+        if investigators.iter().any(|have: &String| have == &name) {
+            return Err(Error::LabInvalid {
+                path: path.to_path_buf(),
+                message: format!("duplicate investigator '{name}'"),
+            });
+        }
+        investigators.push(name);
+    }
     if lab_line.is_none() && lab_name.chars().any(|ch| matches!(ch, '[' | ']' | '(' | ')')) {
         return Err(Error::LabInvalid {
             path: path.to_path_buf(),
@@ -287,11 +342,13 @@ fn parse_lab(path: &Path, text: &str) -> Result<LabFile> {
         });
     }
     Ok(LabFile {
+        institution_name,
         github_org,
         lab_name,
         lab_url,
         lab_line,
         issue_line,
+        investigators,
     })
 }
 
@@ -401,11 +458,13 @@ mod tests {
 
     fn other_lab(issue: Option<&str>) -> LabFile {
         LabFile {
+            institution_name: None,
             github_org: "other-org".to_string(),
             lab_name: "Other Lab".to_string(),
             lab_url: "https://other.example".to_string(),
             lab_line: None,
             issue_line: issue.map(str::to_string),
+            investigators: Vec::new(),
         }
     }
 
@@ -416,11 +475,11 @@ mod tests {
     }
 
     #[test]
-    fn template_matches_default_lab_org() {
+    fn template_matches_the_lab_org() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let lab = load_lab(&root.join("templates/lab.yml")).unwrap();
         let cat = Catalog::load(&root.join("catalog.yaml")).unwrap();
-        let (shape, runtime, org) = cat.apply_preset(None, None, None, None).unwrap();
+        let (shape, runtime, org) = cat.apply_preset(None, None, None, Some("lab")).unwrap();
         assert_eq!(shape, "paper-line");
         assert_eq!(runtime, "uv");
         assert_eq!(org, "lab");

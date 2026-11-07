@@ -15,7 +15,7 @@ Map work onto the tree that is already here. The root `analysis/` tree builds th
 | `scripts/` | Short entry points. The pipeline lives in `analysis/` |
 | `data/` | Pointers and tiny public or synthetic samples |
 | `results/<slug>/` | Generated tables and figures. Gitignored except READMEs |
-| `migration-docs/` | Local legacy dumps after `--migration`. Not a source of truth |
+| `migration-docs/` | Local legacy dumps. Not a source of truth |
 
 ## Scientific truth
 

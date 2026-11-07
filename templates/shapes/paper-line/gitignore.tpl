@@ -38,7 +38,7 @@ __pycache__/
 
 # BEGIN symproject migration-docs
 # Local only. Back this directory up elsewhere.
-# Track another file by listing it in migration-docs/.gitkeep, then re-run new with --migration.
+# Track another file by listing it in migration-docs/.gitkeep, then re-run new.
 migration-docs/**
 !migration-docs/README.md
 !migration-docs/.gitkeep

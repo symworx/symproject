@@ -1,7 +1,8 @@
 # Copyright (c) 2026, Nathaniel T. Berry
 # Licensed under the Apache License, Version 2.0.
 #
-# Copy this file and edit the copy. Pass it to `symproject set-lab` or `symproject new --lab`.
+# Written by `symproject create lab`. Edit this copy. Do not commit it as a stock org.
+# Pass it to `symproject new --lab` or `symproject set-lab`.
 # Omit lab_line to write: Lab: [lab_name](lab_url).
 # Omit issue_line to leave the sentence already in the project.
 
