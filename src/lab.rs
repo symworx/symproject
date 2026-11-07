@@ -36,11 +36,15 @@ const HOLDING_FILES: &[(&str, &[&str])] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabFile {
+    pub institution_name: Option<String>,
     pub github_org: String,
+    /// Org page. When absent, clone URLs use `https://github.com/<github_org>`.
+    pub github_url: Option<String>,
     pub lab_name: String,
     pub lab_url: String,
     pub lab_line: Option<String>,
     pub issue_line: Option<String>,
+    pub investigators: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,25 +64,60 @@ pub struct LabPlan {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct LabRaw {
     version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    institution_name: Option<String>,
     github_org: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    github_url: Option<String>,
     lab_name: String,
     lab_url: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     lab_line: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     issue_line: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    investigators: Vec<String>,
 }
 
 impl LabFile {
     pub fn rendered_lab_line(&self) -> String {
         match &self.lab_line {
             Some(line) => line.clone(),
-            None => format!("Lab: [{}]({}).", self.lab_name, self.lab_url),
+            None => match &self.institution_name {
+                Some(institution) => format!("Lab: [{}]({}), {institution}.", self.lab_name, self.lab_url),
+                None => format!("Lab: [{}]({}).", self.lab_name, self.lab_url),
+            },
         }
     }
+}
+
+pub fn save_lab(path: &Path, lab: &LabFile) -> Result<()> {
+    let raw = LabRaw {
+        version: 1,
+        institution_name: lab.institution_name.clone(),
+        github_org: lab.github_org.clone(),
+        github_url: lab.github_url.clone(),
+        lab_name: lab.lab_name.clone(),
+        lab_url: lab.lab_url.clone(),
+        lab_line: lab.lab_line.clone(),
+        issue_line: lab.issue_line.clone(),
+        investigators: lab.investigators.clone(),
+    };
+    let body = serde_yaml::to_string(&raw).map_err(|err| Error::LabInvalid {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    let text = format!("# Local lab file. Pass it to `symproject new --lab` or `set-lab`.\n{body}");
+    fs::write(path, text)?;
+    Ok(())
 }
 
 pub fn load_lab(path: &Path) -> Result<LabFile> {
@@ -126,6 +165,9 @@ pub fn holdings_from_vars(vars: &BTreeMap<String, String>) -> BTreeMap<String, S
 
 pub fn overlay_lab(vars: &mut BTreeMap<String, String>, lab: &LabFile, project_name: &str) {
     vars.insert("GITHUB_ORG".to_string(), lab.github_org.clone());
+    if let Some(url) = &lab.github_url {
+        vars.insert("GITHUB_URL".to_string(), url.clone());
+    }
     vars.insert("LAB_NAME".to_string(), lab.lab_name.clone());
     vars.insert("LAB_URL".to_string(), lab.lab_url.clone());
     vars.insert("LAB_LINE".to_string(), lab.rendered_lab_line());
@@ -142,6 +184,9 @@ pub fn next_holdings(
 ) -> BTreeMap<String, String> {
     let mut vars = BTreeMap::new();
     vars.insert("GITHUB_ORG".to_string(), lab.github_org.clone());
+    if let Some(url) = &lab.github_url {
+        vars.insert("GITHUB_URL".to_string(), url.clone());
+    }
     fill_repo_urls(&mut vars, project_name);
     let mut next = BTreeMap::new();
     next.insert("LAB_LINE".to_string(), lab.rendered_lab_line());
@@ -257,13 +302,21 @@ fn parse_lab(path: &Path, text: &str) -> Result<LabFile> {
             message: format!("unsupported version {} (expected 1)", raw.version),
         });
     }
+    let institution_name = match raw.institution_name {
+        Some(value) => Some(require_line(path, "institution_name", &value)?),
+        None => None,
+    };
     let github_org = require_line(path, "github_org", &raw.github_org)?;
     if !valid_github_org(&github_org) {
         return Err(Error::LabInvalid {
             path: path.to_path_buf(),
-            message: "github_org must be letters, digits, '-' or '_'".to_string(),
+            message: "github_org must be a GitHub name: letters, digits, '-' or '_'".to_string(),
         });
     }
+    let github_url = match raw.github_url {
+        Some(value) => Some(canonical_org_url(path, &value, Some(&github_org))?),
+        None => None,
+    };
     let lab_name = require_line(path, "lab_name", &raw.lab_name)?;
     let lab_url = require_line(path, "lab_url", &raw.lab_url)?;
     if !valid_http_url(&lab_url) {
@@ -280,6 +333,23 @@ fn parse_lab(path: &Path, text: &str) -> Result<LabFile> {
         Some(value) => Some(require_line(path, "issue_line", &value)?),
         None => None,
     };
+    let mut investigators = Vec::new();
+    for (index, name) in raw.investigators.into_iter().enumerate() {
+        let name = require_line(path, "investigators", &name).map_err(|err| match err {
+            Error::LabInvalid { path, .. } => Error::LabInvalid {
+                path,
+                message: format!("investigators[{index}] must be a single non-empty line"),
+            },
+            other => other,
+        })?;
+        if investigators.iter().any(|have: &String| have == &name) {
+            return Err(Error::LabInvalid {
+                path: path.to_path_buf(),
+                message: format!("duplicate investigator '{name}'"),
+            });
+        }
+        investigators.push(name);
+    }
     if lab_line.is_none() && lab_name.chars().any(|ch| matches!(ch, '[' | ']' | '(' | ')')) {
         return Err(Error::LabInvalid {
             path: path.to_path_buf(),
@@ -287,11 +357,14 @@ fn parse_lab(path: &Path, text: &str) -> Result<LabFile> {
         });
     }
     Ok(LabFile {
+        institution_name,
         github_org,
+        github_url,
         lab_name,
         lab_url,
         lab_line,
         issue_line,
+        investigators,
     })
 }
 
@@ -321,6 +394,153 @@ fn require_line(path: &Path, field: &str, value: &str) -> Result<String> {
         });
     }
     Ok(value.to_string())
+}
+
+/// `github_org` is a GitHub name. A pasted `https://host/<org>` URL is accepted.
+/// `url_input` overrides the org page. An empty URL becomes `https://github.com/<org>`.
+pub fn github_name_and_url(org_input: &str, url_input: Option<&str>) -> Result<(String, String)> {
+    let org_input = org_input.trim();
+    if org_input.contains('@') && !org_input.contains("://") {
+        return Err(Error::Msg(
+            "GitHub org is a name, or an http(s) URL such as https://github.com/<org>".into(),
+        ));
+    }
+    let (name, derived) = if is_github_url(org_input) {
+        let url = org_url(org_input, None)?;
+        let name = org_segment(&url)?;
+        (name, url)
+    } else if !valid_github_org(org_input) {
+        return Err(Error::Msg(
+            "GitHub org must be a name (letters, digits, '-' or '_'), or an http(s) URL".into(),
+        ));
+    } else {
+        (org_input.to_string(), format!("https://github.com/{org_input}"))
+    };
+    let url = match url_input.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => org_url(value, Some(&name))?,
+        None => derived,
+    };
+    Ok((name, url))
+}
+
+pub fn assign_github(lab: &mut LabFile, org_input: Option<&str>, url_input: Option<&str>) -> Result<()> {
+    let org_input = org_input.map(str::trim).filter(|value| !value.is_empty());
+    let url_input = url_input.map(str::trim).filter(|value| !value.is_empty());
+    if org_input.is_none() && url_input.is_none() {
+        return Ok(());
+    }
+    if let Some(value) = org_input.filter(|value| is_github_url(value)) {
+        let (name, url) = github_name_and_url(value, url_input)?;
+        lab.github_org = name;
+        lab.github_url = Some(url);
+        return Ok(());
+    }
+    let name = match org_input {
+        Some(value) => github_name_and_url(value, None)?.0,
+        None => lab.github_org.clone(),
+    };
+    let url = match url_input {
+        Some(value) => github_name_and_url(&name, Some(value))?.1,
+        None if name == lab.github_org => lab
+            .github_url
+            .clone()
+            .unwrap_or_else(|| format!("https://github.com/{name}")),
+        None => {
+            let previous = lab
+                .github_url
+                .clone()
+                .unwrap_or_else(|| format!("https://github.com/{}", lab.github_org));
+            if let Some(prefix) = previous.strip_suffix(&format!("/{}", lab.github_org)) {
+                format!("{prefix}/{name}")
+            } else {
+                format!("https://github.com/{name}")
+            }
+        }
+    };
+    let (name, url) = github_name_and_url(&name, Some(&url))?;
+    lab.github_org = name;
+    lab.github_url = Some(url);
+    Ok(())
+}
+
+fn org_url(value: &str, expected_org: Option<&str>) -> Result<String> {
+    canonical_org_url(Path::new("github_url"), value, expected_org).map_err(|err| match err {
+        Error::LabInvalid { message, .. } => Error::Msg(message),
+        other => other,
+    })
+}
+
+pub fn is_github_url(value: &str) -> bool {
+    let value = value.trim();
+    value.contains("://") || value.starts_with("github.com/") || value.starts_with("www.github.com/")
+}
+
+fn org_segment(url: &str) -> Result<String> {
+    url.rsplit('/')
+        .next()
+        .filter(|segment| valid_github_org(segment))
+        .map(str::to_string)
+        .ok_or_else(|| Error::Msg("GitHub URL needs an org name".into()))
+}
+
+fn canonical_org_url(path: &Path, value: &str, expected_org: Option<&str>) -> Result<String> {
+    let mut text = value.trim().trim_end_matches('/').to_string();
+    if !text.contains("://") {
+        if text.starts_with("github.com/") || text.starts_with("www.github.com/") {
+            text = format!("https://{text}");
+        } else {
+            return Err(Error::LabInvalid {
+                path: path.to_path_buf(),
+                message: "GitHub URL must be an http(s) URL".into(),
+            });
+        }
+    }
+    let scheme = if let Some(rest) = text.strip_prefix("https://") {
+        rest
+    } else if let Some(rest) = text.strip_prefix("http://") {
+        rest
+    } else {
+        return Err(Error::LabInvalid {
+            path: path.to_path_buf(),
+            message: "GitHub URL must be an http(s) URL".into(),
+        });
+    };
+    if scheme.chars().any(char::is_whitespace) {
+        return Err(Error::LabInvalid {
+            path: path.to_path_buf(),
+            message: "GitHub URL must be an http(s) URL".into(),
+        });
+    }
+    let Some((host, path_part)) = scheme.split_once('/') else {
+        return Err(Error::LabInvalid {
+            path: path.to_path_buf(),
+            message: "GitHub URL needs an org name".into(),
+        });
+    };
+    if host.is_empty() {
+        return Err(Error::LabInvalid {
+            path: path.to_path_buf(),
+            message: "GitHub URL needs a host".into(),
+        });
+    }
+    let first = path_part.split('/').next().unwrap_or("");
+    let segment = first.strip_suffix(".git").unwrap_or(first);
+    if !valid_github_org(segment) {
+        return Err(Error::LabInvalid {
+            path: path.to_path_buf(),
+            message: "GitHub URL needs an org name".into(),
+        });
+    }
+    if let Some(expected) = expected_org {
+        if segment != expected {
+            return Err(Error::LabInvalid {
+                path: path.to_path_buf(),
+                message: format!("GitHub URL must use org '{expected}'"),
+            });
+        }
+    }
+    let scheme_name = if text.starts_with("http://") { "http" } else { "https" };
+    Ok(format!("{scheme_name}://{host}/{segment}"))
 }
 
 fn valid_github_org(value: &str) -> bool {
@@ -401,11 +621,14 @@ mod tests {
 
     fn other_lab(issue: Option<&str>) -> LabFile {
         LabFile {
+            institution_name: None,
             github_org: "other-org".to_string(),
+            github_url: None,
             lab_name: "Other Lab".to_string(),
             lab_url: "https://other.example".to_string(),
             lab_line: None,
             issue_line: issue.map(str::to_string),
+            investigators: Vec::new(),
         }
     }
 
@@ -416,11 +639,11 @@ mod tests {
     }
 
     #[test]
-    fn template_matches_default_lab_org() {
+    fn template_matches_the_lab_org() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let lab = load_lab(&root.join("templates/lab.yml")).unwrap();
         let cat = Catalog::load(&root.join("catalog.yaml")).unwrap();
-        let (shape, runtime, org) = cat.apply_preset(None, None, None, None).unwrap();
+        let (shape, runtime, org) = cat.apply_preset(None, None, None, Some("lab")).unwrap();
         assert_eq!(shape, "paper-line");
         assert_eq!(runtime, "uv");
         assert_eq!(org, "lab");
@@ -453,7 +676,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lab.rendered_lab_line(), "Lab: [Lab name](https://lab.example).");
+        assert!(lab.github_url.is_none());
         assert!(lab.issue_line.is_none());
+        let (name, url) = github_name_and_url("https://github.com/Cog-Neuro/some-repo", None).unwrap();
+        assert_eq!(name, "Cog-Neuro");
+        assert_eq!(url, "https://github.com/Cog-Neuro");
+        let (name, url) = github_name_and_url("cog-neuro", Some("https://git.example.edu/cog-neuro/")).unwrap();
+        assert_eq!(name, "cog-neuro");
+        assert_eq!(url, "https://git.example.edu/cog-neuro");
+        let err = github_name_and_url("cog-neuro", Some("https://github.com/other")).unwrap_err();
+        assert!(err.to_string().contains("must use org 'cog-neuro'"), "{err}");
+        let mut custom = other_lab(None);
+        custom.github_org = "cog-neuro".to_string();
+        custom.github_url = Some("https://git.example.edu/cog-neuro".to_string());
+        let mut vars = BTreeMap::new();
+        overlay_lab(&mut vars, &custom, "demo-study");
+        assert_eq!(vars["REPO_WEB"], "https://git.example.edu/cog-neuro/demo-study");
+        assert_eq!(
+            vars["CLONE_SNIPPET"],
+            "git clone https://git.example.edu/cog-neuro/demo-study.git"
+        );
         let err = parse_lab(
             Path::new("lab.yml"),
             "version: 1\ngithub_org: lab-org\nlab_name: Lab name\nlab_url: https://lab.example\nlab_line: \"\"\n",

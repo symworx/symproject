@@ -51,7 +51,7 @@ pub struct NewProject {
     pub paper_title: Option<String>,
     pub with_agents: bool,
     pub adapters: Option<String>,
-    pub migration: bool,
+    pub migration_docs: bool,
 }
 
 pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
@@ -88,14 +88,20 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
         return Err(Error::TemplatesMissing(template_dir));
     }
     let catalog = Catalog::load(&root.join("catalog.yaml"))?;
-    let (shape, runtime, org) = catalog.apply_preset(
+    let (shape, runtime, mut org) = catalog.apply_preset(
         req.preset.as_deref(),
         req.shape.as_deref(),
         req.runtime.as_deref(),
         req.org.as_deref(),
     )?;
-    if req.lab.is_some() && org == "none" {
-        return Err(Error::LabWithNeutralOrg);
+    if req.lab.is_some() {
+        let explicit_none = req.org.as_deref().is_some_and(|value| value == "none");
+        if explicit_none {
+            return Err(Error::LabWithNeutralOrg);
+        }
+        if org == "none" {
+            org = "lab".to_string();
+        }
     }
     let resolved = catalog.resolve(Resolve {
         shape: &shape,
@@ -132,8 +138,10 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
     }
 
     let (mut created, mut skipped) = apply_tree(&template_dir, &req.outdir, &resolved.dirs, &resolved.items, &vars)?;
-    if req.migration {
+    if req.migration_docs {
         write_migration(&template_dir, &req.outdir, &mut created, &mut skipped)?;
+    } else {
+        log("migration-docs: skipped (--no-migration-docs)");
     }
     write_project_sidecar(&req.outdir, &req.project_name, &resolved.org, &vars)?;
 
@@ -152,10 +160,54 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
     install_agents(req)?;
 
     log("Next: edit the aim in README.md, then add papers with `symproject paper <slug> --title \"...\"`.");
-    log(&format!("Lab template: {}", root.join("templates/lab.yml").display()));
+    if req.lab.is_some() {
+        log("Lab file applied. Later changes: symproject set-lab <file>.");
+    } else if resolved.org == "lab" {
+        log("Placeholder lab line. symproject labs, then symproject set-lab <file>.");
+    } else {
+        log("No lab line. symproject labs, then pass --lab on the first new.");
+    }
     log("Work on nb/<slug>. main holds the settled layout.");
     log("Do not commit data/private/, data/open/, or generated files under results/.");
     Ok(())
+}
+
+pub fn create_lab(root: &Path, dest: &Path) -> Result<PathBuf> {
+    let src = root.join("templates/lab.yml");
+    if !src.is_file() {
+        return Err(Error::MissingTemplate(src.display().to_string()));
+    }
+    let dest = if dest.is_dir() {
+        dest.join("lab.yml")
+    } else {
+        dest.to_path_buf()
+    };
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() && parent.exists() && is_root(parent) {
+            let shown = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+            return Err(Error::KitRoot(shown));
+        }
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    if dest.exists() {
+        log(&format!("skip (exists): {}", dest.display()));
+        log("lab.yml was not replaced. Edit it, then pass --lab or set-lab.");
+        return Ok(dest);
+    }
+    fs::copy(&src, &dest)?;
+    log(&format!("created: {}", dest.display()));
+    log("Edit github_org, lab_name, lab_url, and issue_line.");
+    log(&format!(
+        "Then: symproject new <name> --title \"...\" --lab {}",
+        dest.display()
+    ));
+    log(&format!(
+        "Or, on a project that already has a lab line: symproject set-lab {}",
+        dest.display()
+    ));
+    Ok(dest)
 }
 
 pub fn set_lab(outdir: &Path, lab_path: &Path, dry_run: bool) -> Result<()> {
@@ -554,7 +606,7 @@ fn migration_block(extras: &[String]) -> String {
     let mut lines = vec![
         MIG_BEGIN.to_string(),
         "# Local only. Back this directory up elsewhere.".to_string(),
-        "# Track another file by listing it in migration-docs/.gitkeep, then re-run new with --migration.".to_string(),
+        "# Track another file by listing it in migration-docs/.gitkeep, then re-run new.".to_string(),
         "migration-docs/**".to_string(),
         "!migration-docs/README.md".to_string(),
         "!migration-docs/.gitkeep".to_string(),
@@ -750,7 +802,7 @@ mod tests {
             paper_title: None,
             with_agents: false,
             adapters: None,
-            migration: false,
+            migration_docs: true,
         }
     }
 
@@ -796,7 +848,8 @@ mod tests {
         let agents = fs::read_to_string(out.join("AGENTS.md")).unwrap();
         assert!(agents.contains("notes/claims.md"), "{agents}");
         assert!(agents.contains("Do not add `docs/aims.md`"), "{agents}");
-        assert!(!out.join("migration-docs").exists());
+        assert!(out.join("migration-docs/README.md").is_file());
+        assert!(out.join("migration-docs/.gitkeep").is_file());
         let gitignore = fs::read_to_string(out.join(".gitignore")).unwrap();
         assert_eq!(gitignore.matches(MIG_BEGIN).count(), 1, "{gitignore}");
         assert!(gitignore.contains("migration-docs/**"), "{gitignore}");
@@ -811,7 +864,8 @@ mod tests {
         assert_eq!(String::from_utf8(branch.stdout).unwrap().trim(), "main");
         let readme = fs::read_to_string(out.join("README.md")).unwrap();
         assert!(readme.contains("Demo line"));
-        assert!(readme.contains("lab.example"));
+        assert!(readme.contains("git clone <repository-url>"), "{readme}");
+        assert!(!readme.contains("lab.example"), "{readme}");
         assert!(!readme.contains("__PROJECT_TITLE__"));
         assert!(out.join(".symproject.yaml").is_file());
         fs::write(out.join("README.md"), "keep-me\n").unwrap();
@@ -863,8 +917,7 @@ mod tests {
     fn migration_tracks_a_path_listed_in_gitkeep() {
         let tmp = tempfile::tempdir().unwrap();
         let out = tmp.path().join("demo-study");
-        let mut req = new_req(out.clone(), "demo-study", "none");
-        req.migration = true;
+        let req = new_req(out.clone(), "demo-study", "none");
         scaffold(&kit(), &req).unwrap();
         assert!(out.join("migration-docs/README.md").is_file());
         let readme = fs::read_to_string(out.join("migration-docs/README.md")).unwrap();
@@ -904,6 +957,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn no_migration_docs_skips_create_and_refresh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("demo-study");
+        let mut req = new_req(out.clone(), "demo-study", "none");
+        req.migration_docs = false;
+        scaffold(&kit(), &req).unwrap();
+        assert!(!out.join("migration-docs").exists());
+        let gitignore = fs::read_to_string(out.join(".gitignore")).unwrap();
+        assert!(gitignore.contains("migration-docs/**"), "{gitignore}");
+
+        req.migration_docs = true;
+        scaffold(&kit(), &req).unwrap();
+        assert!(out.join("migration-docs/README.md").is_file());
+        let mut keep = fs::read_to_string(out.join("migration-docs/.gitkeep")).unwrap();
+        keep.push_str("legacy.pdf\n");
+        fs::write(out.join("migration-docs/.gitkeep"), keep).unwrap();
+        req.migration_docs = false;
+        scaffold(&kit(), &req).unwrap();
+        let gitignore = fs::read_to_string(out.join(".gitignore")).unwrap();
+        assert!(!gitignore.contains("!migration-docs/legacy.pdf"), "{gitignore}");
+        assert!(out.join("migration-docs/README.md").is_file());
+    }
+
     fn write_lab(dir: &Path, github_org: &str, lab_name: &str, lab_url: &str, issue: &str) -> PathBuf {
         let path = dir.join(format!("{github_org}.yml"));
         let text = format!(
@@ -917,7 +994,9 @@ mod tests {
     fn set_lab_replaces_holdings_and_a_second_file_replaces_them_again() {
         let tmp = tempfile::tempdir().unwrap();
         let out = tmp.path().join("demo-study");
-        scaffold(&kit(), &new_req(out.clone(), "demo-study", "none")).unwrap();
+        let mut req = new_req(out.clone(), "demo-study", "none");
+        req.org = Some("lab".to_string());
+        scaffold(&kit(), &req).unwrap();
         add_paper(&kit(), &out, "multirate-fusion", "Multirate fusion").unwrap();
         let claims = fs::read_to_string(out.join("papers/multirate-fusion/notes/claims.md")).unwrap();
         fs::write(out.join("README.md"), {
@@ -981,7 +1060,9 @@ mod tests {
     fn set_lab_leaves_a_missing_holding_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let out = tmp.path().join("demo-study");
-        scaffold(&kit(), &new_req(out.clone(), "demo-study", "none")).unwrap();
+        let mut req = new_req(out.clone(), "demo-study", "none");
+        req.org = Some("lab".to_string());
+        scaffold(&kit(), &req).unwrap();
         let mut readme = fs::read_to_string(out.join("README.md")).unwrap();
         let old = "Lab: [Lab name](https://lab.example).";
         assert!(readme.contains(old), "{readme}");
@@ -1093,6 +1174,24 @@ mod tests {
         let err = scaffold(&kit(), &req).unwrap_err();
         assert!(err.to_string().contains("--org none"), "{err}");
         assert!(!tmp.path().join("nope").exists());
+    }
+
+    #[test]
+    fn create_lab_writes_a_local_copy_and_skips_a_second_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("lab.yml");
+        let written = create_lab(&kit(), &dest).unwrap();
+        assert_eq!(written, dest);
+        let text = fs::read_to_string(&dest).unwrap();
+        let template = fs::read_to_string(kit().join("templates/lab.yml")).unwrap();
+        assert_eq!(text, template);
+        assert!(text.contains("github_org: lab-org"), "{text}");
+        assert!(!text.to_lowercase().contains("csymd"), "{text}");
+        fs::write(&dest, "keep-me\n").unwrap();
+        create_lab(&kit(), tmp.path()).unwrap();
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "keep-me\n");
+        let err = create_lab(&kit(), &kit().join("lab.yml")).unwrap_err();
+        assert!(err.to_string().contains("refusing to write"), "{err}");
     }
 
     #[test]

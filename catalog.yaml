@@ -1,8 +1,9 @@
 # Copyright (c) 2026, Nathaniel T. Berry
 # Licensed under the Apache License, Version 2.0.
 #
-# Source of truth for shapes, runtimes, the default lab org, and the paper stub.
-# Copy templates/lab.yml for a real lab. Do not hardcode those ids in the scaffolder (src/).
+# Source of truth for shapes, runtimes, and the paper stub.
+# The default org is none. A real lab is a local file from `symproject labs`.
+# Do not hardcode lab names in the scaffolder (src/).
 
 version: 1
 
@@ -13,7 +14,7 @@ kit:
 defaults:
   shape: paper-line
   runtime: uv
-  org: lab
+  org: none
 
 shapes:
   paper-line:
@@ -88,9 +89,9 @@ runtimes:
 
 orgs:
   none:
-    description: Lab-neutral paper line
+    description: No lab line. This is the default
   lab:
-    description: "Default lab overlay. Replace with `symproject set-lab`."
+    description: Replaceable lab line for --lab and set-lab. Not a real lab
     vars:
       GITHUB_ORG: lab-org
       LAB_URL: https://lab.example
