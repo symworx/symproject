@@ -26,6 +26,15 @@ use symproject::{
 #[command(
     name = "symproject",
     about = "Scaffold a research-project repository from catalog.yaml (paper line + runtime + org).",
+    after_help = "\
+Labs:
+  Local identity files: institution, name, GitHub org name, GitHub URL, lab URL, and investigators.
+
+  labs        Menu for those files. Arrow keys choose new, edit, or delete
+  create lab  Write a lab file. Shortcut for new
+  edit lab    Change a lab file. Shortcut for edit
+  delete lab  Remove a lab file. Shortcut for delete
+",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -45,13 +54,17 @@ enum Command {
     Paper(Box<PaperArgs>),
     /// Replace the lab line, issue line, and clone URL from a lab.yml file
     SetLab(Box<SetLabArgs>),
-    /// Write a local template
+    /// Write a lab file. Shortcut for the new choice in `labs`
+    #[command(hide = true)]
     Create(CreateArgs),
-    /// List labs. In a terminal, arrow keys choose new, edit, or delete
+    /// Menu for local lab files. Arrow keys choose new, edit, or delete
+    #[command(hide = true)]
     Labs,
-    /// Change a local lab file
+    /// Change a lab file. Shortcut for the edit choice in `labs`
+    #[command(hide = true)]
     Edit(EditArgs),
-    /// Remove a local lab file
+    /// Remove a lab file. Shortcut for the delete choice in `labs`
+    #[command(hide = true)]
     Delete(DeleteArgs),
 }
 
@@ -124,9 +137,12 @@ struct CreateLabArgs {
     /// Lab name
     #[arg(long = "lab-name")]
     lab_name: Option<String>,
-    /// GitHub org. Also the file name under the labs directory
+    /// GitHub org name, such as cog-neuro. A https://github.com/<org> URL is accepted
     #[arg(long = "github-org")]
     github_org: Option<String>,
+    /// GitHub URL for the org. Defaults to https://github.com/<org>
+    #[arg(long = "github-url")]
+    github_url: Option<String>,
     /// Lab home page
     #[arg(long = "lab-url")]
     lab_url: Option<String>,
@@ -155,8 +171,12 @@ struct EditLabArgs {
     institution: Option<String>,
     #[arg(long = "lab-name")]
     lab_name: Option<String>,
+    /// GitHub org name, such as cog-neuro. A https://github.com/<org> URL is accepted
     #[arg(long = "github-org")]
     github_org: Option<String>,
+    /// GitHub URL for the org. Defaults to https://github.com/<org>
+    #[arg(long = "github-url")]
+    github_url: Option<String>,
     #[arg(long = "lab-url")]
     lab_url: Option<String>,
     /// Replace the investigator list. Repeat for each person
@@ -310,6 +330,7 @@ fn run() -> Result<()> {
                         institution_name: lab.institution,
                         lab_name: lab.lab_name,
                         github_org: lab.github_org,
+                        github_url: lab.github_url,
                         lab_url: lab.lab_url,
                         investigators,
                     },
@@ -343,6 +364,7 @@ fn create_lab_command(root: &std::path::Path, lab: CreateLabArgs) -> Result<()> 
     let flagged = lab.institution.is_some()
         || lab.lab_name.is_some()
         || lab.github_org.is_some()
+        || lab.github_url.is_some()
         || lab.lab_url.is_some()
         || !lab.investigator.is_empty();
     if flagged {
@@ -355,12 +377,14 @@ fn create_lab_command(root: &std::path::Path, lab: CreateLabArgs) -> Result<()> 
         let github_org = lab
             .github_org
             .ok_or_else(|| symproject::error::Error::Msg("pass --github-org".into()))?;
+        let (github_org, github_url) = symproject::lab::github_name_and_url(&github_org, lab.github_url.as_deref())?;
         let lab_url = lab
             .lab_url
             .ok_or_else(|| symproject::error::Error::Msg("pass --lab-url".into()))?;
         let record = LabFile {
             institution_name: Some(institution),
             github_org,
+            github_url: Some(github_url),
             lab_name,
             lab_url,
             lab_line: None,
@@ -396,4 +420,31 @@ fn create_lab_command(root: &std::path::Path, lab: CreateLabArgs) -> Result<()> 
     };
     scaffold::create_lab(root, &dest)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    use super::Cli;
+
+    #[test]
+    fn help_puts_lab_commands_in_their_own_section() {
+        let mut cmd = Cli::command().term_width(120);
+        let mut buf = Vec::new();
+        cmd.write_long_help(&mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        let (commands, labs) = text.split_once("Labs:").expect("labs heading");
+        assert!(commands.contains("Commands:"), "{text}");
+        assert!(commands.contains("set-lab"), "{text}");
+        assert!(!commands.contains("\n  labs"), "{commands}");
+        assert!(!commands.contains("\n  create"), "{commands}");
+        assert!(!commands.contains("\n  edit"), "{commands}");
+        assert!(!commands.contains("\n  delete"), "{commands}");
+        assert!(labs.contains("Local identity files:"), "{labs}");
+        assert!(labs.contains("\n  labs        Menu for those files."), "{labs}");
+        assert!(labs.contains("\n  create lab  Write a lab file."), "{labs}");
+        assert!(labs.contains("\n  edit lab    Change a lab file."), "{labs}");
+        assert!(labs.contains("\n  delete lab  Remove a lab file."), "{labs}");
+    }
 }

@@ -410,6 +410,7 @@ pub struct LabPatch {
     pub institution_name: Option<String>,
     pub lab_name: Option<String>,
     pub github_org: Option<String>,
+    pub github_url: Option<String>,
     pub lab_url: Option<String>,
     pub investigators: Option<Vec<String>>,
 }
@@ -419,6 +420,7 @@ impl LabPatch {
         self.institution_name.is_none()
             && self.lab_name.is_none()
             && self.github_org.is_none()
+            && self.github_url.is_none()
             && self.lab_url.is_none()
             && self.investigators.is_none()
     }
@@ -430,9 +432,7 @@ impl LabPatch {
         if let Some(value) = self.lab_name {
             lab.lab_name = require_value("lab name", &value)?;
         }
-        if let Some(value) = self.github_org {
-            lab.github_org = require_org(&value)?;
-        }
+        lab::assign_github(&mut lab, self.github_org.as_deref(), self.github_url.as_deref())?;
         if let Some(value) = self.lab_url {
             lab.lab_url = require_url(&value)?;
         }
@@ -483,11 +483,22 @@ fn confirm_delete(reader: &mut impl BufRead, out: &mut impl Write, name: &str) -
 fn prompt_new(reader: &mut impl BufRead, out: &mut impl Write) -> Result<LabFile> {
     let institution = require_value("institution name", &prompt(out, reader, "Institution name: ")?)?;
     let lab_name = require_value("lab name", &prompt(out, reader, "Lab name: ")?)?;
-    let org_input = prompt(out, reader, "GitHub org: ")?;
-    let github_org = if org_input.is_empty() {
+    let org_input = prompt(out, reader, "GitHub org (name, or https://github.com/<org>): ")?;
+    let org_input = if org_input.is_empty() {
         slug_org(&lab_name)?
     } else {
-        require_org(&org_input)?
+        org_input
+    };
+    let (github_org, github_url) = if lab::is_github_url(&org_input) {
+        lab::github_name_and_url(&org_input, None)?
+    } else {
+        let (name, default_url) = lab::github_name_and_url(&org_input, None)?;
+        let typed = prompt(out, reader, &format!("GitHub URL [{default_url}]: "))?;
+        if typed.is_empty() {
+            (name, default_url)
+        } else {
+            lab::github_name_and_url(&name, Some(&typed))?
+        }
     };
     let lab_url = require_url(&prompt(out, reader, "Lab URL: ")?)?;
     writeln!(out, "Investigators (one name per line, blank line when done):")?;
@@ -505,6 +516,7 @@ fn prompt_new(reader: &mut impl BufRead, out: &mut impl Write) -> Result<LabFile
     Ok(LabFile {
         institution_name: Some(institution),
         github_org,
+        github_url: Some(github_url),
         lab_name,
         lab_url,
         lab_line: None,
@@ -522,17 +534,33 @@ fn prompt_edit(reader: &mut impl BufRead, out: &mut impl Write, current: &LabFil
     )?;
     let lab_name = prompt_keep(out, reader, "Lab name", &current.lab_name)?;
     let github_org = prompt_keep(out, reader, "GitHub org", &current.github_org)?;
+    let shown_github_url = current
+        .github_url
+        .clone()
+        .unwrap_or_else(|| format!("https://github.com/{}", current.github_org));
+    let github_url = prompt_keep(out, reader, "GitHub URL", &shown_github_url)?;
     let lab_url = prompt_keep(out, reader, "Lab URL", &current.lab_url)?;
     let lab_name = if lab_name.is_empty() {
         current.lab_name.clone()
     } else {
         require_value("lab name", &lab_name)?
     };
-    let github_org = if github_org.is_empty() {
-        current.github_org.clone()
-    } else {
-        require_org(&github_org)?
-    };
+    let mut draft = current.clone();
+    lab::assign_github(
+        &mut draft,
+        if github_org.is_empty() {
+            None
+        } else {
+            Some(github_org.as_str())
+        },
+        if github_url.is_empty() {
+            None
+        } else {
+            Some(github_url.as_str())
+        },
+    )?;
+    let github_org = draft.github_org;
+    let github_url = draft.github_url;
     let lab_url = if lab_url.is_empty() {
         current.lab_url.clone()
     } else {
@@ -578,6 +606,7 @@ fn prompt_edit(reader: &mut impl BufRead, out: &mut impl Write, current: &LabFil
     Ok(LabFile {
         institution_name,
         github_org,
+        github_url,
         lab_name,
         lab_url,
         lab_line: current.lab_line.clone(),
@@ -699,13 +728,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         let mut input = script(
-            "new\nState University\nCog Neuro\ncog-neuro\nhttps://example.edu/cog\nAda Lovelace\nGrace Hopper\n\nquit\n",
+            "new\nState University\nCog Neuro\ncog-neuro\n\nhttps://example.edu/cog\nAda Lovelace\nGrace Hopper\n\nquit\n",
         );
         let mut out = Vec::new();
         run_labs(dir, true, &mut input, &mut out).unwrap();
         let path = dir.join("cog-neuro.yml");
         let lab = lab::load_lab(&path).unwrap();
         assert_eq!(lab.institution_name.as_deref(), Some("State University"));
+        assert_eq!(lab.github_url.as_deref(), Some("https://github.com/cog-neuro"));
         assert_eq!(
             lab.investigators,
             vec!["Ada Lovelace".to_string(), "Grace Hopper".to_string()]
@@ -715,7 +745,7 @@ mod tests {
             "Lab: [Cog Neuro](https://example.edu/cog), State University."
         );
 
-        let mut input = script("\n\n\n\nadd Katherine Johnson\n\n");
+        let mut input = script("\n\n\n\n\nadd Katherine Johnson\n\n");
         let mut out = Vec::new();
         edit_lab(dir, "cog-neuro", LabPatch::default(), true, &mut input, &mut out).unwrap();
         let lab = lab::load_lab(&path).unwrap();
@@ -805,6 +835,7 @@ mod tests {
         LabFile {
             institution_name: Some("State University".into()),
             github_org: "cog-neuro".into(),
+            github_url: None,
             lab_name: "Cog Neuro".into(),
             lab_url: "https://example.edu/cog".into(),
             lab_line: None,

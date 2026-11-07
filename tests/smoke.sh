@@ -16,6 +16,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 "$CLI" help >/dev/null
 "$CLI" -h >/dev/null
+"$CLI" help | grep -q '^Labs:' || fail "help labs section"
+"$CLI" help | grep -q 'create lab' || fail "help create lab"
 "$CLI" list | grep -q 'shape    paper-line' || fail "list defaults"
 "$CLI" list | grep -q 'org      none' || fail "list default org"
 "$CLI" list | grep -q 'symproject labs' || fail "list labs"

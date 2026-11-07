@@ -3,6 +3,8 @@
 #
 # Written by `symproject create lab`. Edit this copy. Do not commit it as a stock org.
 # Pass it to `symproject new --lab` or `symproject set-lab`.
+# github_org is the GitHub name, such as lab-org. Not a URL.
+# github_url is optional. When omitted, clone URLs use https://github.com/github_org.
 # Omit lab_line to write: Lab: [lab_name](lab_url).
 # Omit issue_line to leave the sentence already in the project.
 

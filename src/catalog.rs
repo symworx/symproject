@@ -281,14 +281,16 @@ pub fn fill_repo_urls(vars: &mut BTreeMap<String, String>, project_name: &str) {
         vars.insert("REPO_WEB".to_string(), "the project repository".to_string());
         return;
     }
+    let base = vars
+        .get("GITHUB_URL")
+        .map(|url| url.trim_end_matches('/').to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| format!("https://github.com/{ghorg}"));
     vars.insert(
         "CLONE_SNIPPET".to_string(),
-        format!("git clone https://github.com/{ghorg}/{project_name}.git"),
+        format!("git clone {base}/{project_name}.git"),
     );
-    vars.insert(
-        "REPO_WEB".to_string(),
-        format!("https://github.com/{ghorg}/{project_name}"),
-    );
+    vars.insert("REPO_WEB".to_string(), format!("{base}/{project_name}"));
 }
 
 fn blank_to_none(value: Option<&str>) -> Option<&str> {
