@@ -7,6 +7,7 @@ use std::{
     env,
     fs,
     io::{
+        self,
         BufRead,
         Write,
     },
@@ -24,6 +25,11 @@ use crate::{
     lab::{
         self,
         LabFile,
+    },
+    term_menu::{
+        self,
+        Choice,
+        MenuFail,
     },
 };
 
@@ -98,6 +104,15 @@ pub fn list_labs(dir: &Path) -> Result<Vec<LabEntry>> {
     Ok(labs)
 }
 
+pub fn run_labs_interactive(dir: &Path) -> Result<()> {
+    let stdin_tty = std::io::IsTerminal::is_terminal(&io::stdin());
+    let stdout_tty = std::io::IsTerminal::is_terminal(&io::stdout());
+    if stdin_tty && stdout_tty && term_menu::raw_mode_works() {
+        return run_labs_arrows(dir);
+    }
+    run_labs(dir, stdin_tty, &mut io::stdin().lock(), &mut io::stdout())
+}
+
 pub fn run_labs(dir: &Path, interactive: bool, reader: &mut impl BufRead, out: &mut impl Write) -> Result<()> {
     if interactive {
         writeln!(
@@ -164,6 +179,124 @@ fn menu_delete(dir: &Path, reader: &mut impl BufRead, out: &mut impl Write) -> R
     fs::remove_file(&entry.path)?;
     writeln!(out, "deleted: {}", entry.path.display())?;
     Ok(())
+}
+
+fn run_labs_arrows(dir: &Path) -> Result<()> {
+    let mut out = io::stdout();
+    writeln!(
+        out,
+        "Shortcuts: symproject create lab, symproject edit lab, symproject delete lab"
+    )?;
+    writeln!(out)?;
+    writeln!(out, "Arrow keys move. Enter selects. q or Ctrl-C quits.")?;
+    writeln!(out)?;
+    let actions = ["new", "edit", "delete", "quit"];
+    loop {
+        print_index(dir, &mut out)?;
+        let choice = match term_menu::select_index(&mut out, &actions).map_err(menu_error)? {
+            Choice::Chosen(index) => actions[index],
+            Choice::Back | Choice::Quit => return Ok(()),
+        };
+        match choice {
+            "new" => {
+                let mut reader = io::stdin().lock();
+                if let Err(err) = prompt_new(&mut reader, &mut out).and_then(|lab| store_new(dir, &lab, &mut out)) {
+                    writeln!(out, "error: {err}")?;
+                }
+            }
+            "edit" => match edit_from_arrows(dir, &mut out) {
+                Ok(ArrowStep::Continue) => {}
+                Ok(ArrowStep::Quit) => return Ok(()),
+                Err(err) => writeln!(out, "error: {err}")?,
+            },
+            "delete" => match delete_from_arrows(dir, &mut out) {
+                Ok(ArrowStep::Continue) => {}
+                Ok(ArrowStep::Quit) => return Ok(()),
+                Err(err) => writeln!(out, "error: {err}")?,
+            },
+            "quit" => return Ok(()),
+            _ => {}
+        }
+    }
+}
+
+enum ArrowStep {
+    Continue,
+    Quit,
+}
+
+enum ArrowPick {
+    Chosen(Box<LabEntry>),
+    Empty,
+    Back,
+    Quit,
+}
+
+fn edit_from_arrows(dir: &Path, out: &mut impl Write) -> Result<ArrowStep> {
+    match pick_arrows(dir, out)? {
+        ArrowPick::Empty => {
+            writeln!(out, "No labs yet.")?;
+            Ok(ArrowStep::Continue)
+        }
+        ArrowPick::Back => Ok(ArrowStep::Continue),
+        ArrowPick::Quit => Ok(ArrowStep::Quit),
+        ArrowPick::Chosen(entry) => {
+            let mut reader = io::stdin().lock();
+            let updated = prompt_edit(&mut reader, out, &entry.lab)?;
+            let path = store_edit(&entry, &updated)?;
+            writeln!(out, "updated: {}", path.display())?;
+            Ok(ArrowStep::Continue)
+        }
+    }
+}
+
+fn delete_from_arrows(dir: &Path, out: &mut impl Write) -> Result<ArrowStep> {
+    match pick_arrows(dir, out)? {
+        ArrowPick::Empty => {
+            writeln!(out, "No labs yet.")?;
+            Ok(ArrowStep::Continue)
+        }
+        ArrowPick::Back => Ok(ArrowStep::Continue),
+        ArrowPick::Quit => Ok(ArrowStep::Quit),
+        ArrowPick::Chosen(entry) => {
+            let mut reader = io::stdin().lock();
+            if !confirm_delete(&mut reader, out, &entry.name)? {
+                writeln!(out, "left in place: {}", entry.path.display())?;
+                return Ok(ArrowStep::Continue);
+            }
+            fs::remove_file(&entry.path)?;
+            writeln!(out, "deleted: {}", entry.path.display())?;
+            Ok(ArrowStep::Continue)
+        }
+    }
+}
+
+fn pick_arrows(dir: &Path, out: &mut impl Write) -> Result<ArrowPick> {
+    let labs = list_labs(dir)?;
+    if labs.is_empty() {
+        return Ok(ArrowPick::Empty);
+    }
+    let labels: Vec<String> = labs
+        .iter()
+        .map(|entry| format!("{}    {}", entry.name, summary(&entry.lab)))
+        .collect();
+    match term_menu::select_index(out, &labels).map_err(menu_error)? {
+        Choice::Chosen(index) => {
+            let Some(entry) = labs.into_iter().nth(index) else {
+                return Err(Error::Msg("menu index was out of range".into()));
+            };
+            Ok(ArrowPick::Chosen(Box::new(entry)))
+        }
+        Choice::Back => Ok(ArrowPick::Back),
+        Choice::Quit => Ok(ArrowPick::Quit),
+    }
+}
+
+fn menu_error(err: MenuFail) -> Error {
+    match err {
+        MenuFail::NotATerminal => Error::Msg("terminal raw mode unavailable".into()),
+        MenuFail::Io(err) => Error::Io(err),
+    }
 }
 
 pub fn create_interactive(dir: &Path, reader: &mut impl BufRead, out: &mut impl Write) -> Result<PathBuf> {

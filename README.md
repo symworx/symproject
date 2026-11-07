@@ -85,7 +85,7 @@ No `--scaffold` and no `--docs`. Layout is this tool's job. `new` writes `docs/d
 
 Later layers override the same destination: shape, then runtime, then org. `--lab` overrides the org vars. `--github-org` overrides the GitHub org from the lab file.
 
-`symproject labs` lists local labs. In a terminal it asks for `new`, `edit`, `delete`, or `quit`. Without a terminal it prints the list and the shortcuts, then exits.
+`symproject labs` lists local labs. In a terminal, the arrow keys move between `new`, `edit`, `delete`, and `quit`. Enter selects. `q` or Ctrl-C quits. Enter on `edit` or `delete` uses the arrow keys to choose a lab. Without a terminal it prints the list and the shortcuts, then exits.
 
 Labs are stored in `$SYMPROJECT_LABS`, or `$XDG_CONFIG_HOME/symproject/labs`, or `~/.config/symproject/labs`. The file name is `<github-org>.yml`. `--lab <name>` and `set-lab <name>` use that file when `<name>` is not already a path.
 

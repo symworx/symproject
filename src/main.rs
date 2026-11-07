@@ -47,7 +47,7 @@ enum Command {
     SetLab(Box<SetLabArgs>),
     /// Write a local template
     Create(CreateArgs),
-    /// List labs and choose new, edit, or delete
+    /// List labs. In a terminal, arrow keys choose new, edit, or delete
     Labs,
     /// Change a local lab file
     Edit(EditArgs),
@@ -291,8 +291,7 @@ fn run() -> Result<()> {
         }
         Some(Command::Labs) => {
             let dir = symproject::labs::labs_dir()?;
-            let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
-            symproject::labs::run_labs(&dir, interactive, &mut std::io::stdin().lock(), &mut std::io::stdout())?;
+            symproject::labs::run_labs_interactive(&dir)?;
             Ok(())
         }
         Some(Command::Edit(args)) => match args.command {

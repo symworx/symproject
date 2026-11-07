@@ -259,4 +259,75 @@ SYMPROJECT_LABS="$LABS" "$CLI" delete lab cog-neuro --yes
 [[ ! -e "$LABS/cog-neuro.yml" ]] || fail "delete --yes"
 grep -F -q "State University." "$T_LAB/README.md" || fail "delete must not rewrite the project"
 
+command -v python3 >/dev/null 2>&1 || fail "python3 is required for the arrow-menu check"
+python3 - "$CLI" "$TMP/arrow-labs" <<'PY'
+import os, select, sys, time
+
+cli, labs = sys.argv[1], sys.argv[2]
+os.environ["SYMPROJECT_LABS"] = labs
+os.environ.pop("SYMPROJECT_ROOT", None)
+os.environ.pop("SYMPROJECT_DATA", None)
+
+master, slave = os.openpty()
+pid = os.fork()
+if pid == 0:
+    try:
+        os.setsid()
+        os.dup2(slave, 0)
+        os.dup2(slave, 1)
+        os.dup2(slave, 2)
+        if slave > 2:
+            os.close(slave)
+        os.close(master)
+        os.execv(cli, [cli, "labs"])
+    finally:
+        os._exit(127)
+
+os.close(slave)
+
+def read_until(needle, timeout):
+    buf = b""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        ready, _, _ = select.select([master], [], [], 0.2)
+        if master not in ready:
+            continue
+        try:
+            chunk = os.read(master, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+        if needle in buf:
+            return buf
+    sys.stderr.buffer.write(buf)
+    raise SystemExit(f"missing {needle!r}")
+
+try:
+    read_until(b"> new", 5)
+    os.write(master, b"\x1b[B")
+    read_until(b"> edit", 5)
+    os.write(master, b"q")
+    deadline = time.time() + 5
+    status = None
+    while time.time() < deadline:
+        done, status = os.waitpid(pid, os.WNOHANG)
+        if done == pid:
+            break
+        ready, _, _ = select.select([master], [], [], 0.1)
+        if master in ready:
+            try:
+                os.read(master, 4096)
+            except OSError:
+                pass
+    else:
+        os.kill(pid, 15)
+        raise SystemExit("labs did not exit after q")
+    if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+        raise SystemExit(f"labs exited with status {status}")
+finally:
+    os.close(master)
+PY
+
 echo OK
