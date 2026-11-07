@@ -89,6 +89,9 @@ struct NewArgs {
     /// Passed to nested symkit (grok, claude, codex, all, none)
     #[arg(long)]
     adapters: Option<String>,
+    /// Create migration-docs/ for local legacy files. Dumps stay untracked
+    #[arg(long)]
+    migration: bool,
 }
 
 #[derive(Args)]
@@ -162,6 +165,7 @@ fn run() -> Result<()> {
                     paper_title: args.paper_title,
                     with_agents: !args.no_agents,
                     adapters: args.adapters,
+                    migration: args.migration,
                 },
             )
         }

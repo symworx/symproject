@@ -46,6 +46,8 @@ T1="$TMP/demo-study"
 [[ -f "$T1/docs/methods/README.md" ]] || fail "methods"
 [[ -f "$T1/analysis/README.md" ]] || fail "shared analysis"
 [[ ! -e "$T1/docs/aims.md" ]] || fail "must not write docs/aims.md"
+[[ ! -e "$T1/migration-docs" ]] || fail "migration is opt-in"
+grep -q 'BEGIN symproject migration-docs' "$T1/.gitignore" || fail "migration gitignore"
 [[ -d "$T1/.git" ]] || fail "git init"
 git -C "$T1" branch --show-current | grep -qx main || fail "default branch main"
 [[ ! -e "$T1/pyproject.toml" ]] || fail "runtime none must not write pyproject.toml"
@@ -158,5 +160,32 @@ grep -q "other.example" "$T_STAMP/README.md" || fail "new --lab"
   --lab "$TMP/lab-2.yml"
 grep -q "other.example" "$T_STAMP/README.md" || fail "new rerun must keep the first lab"
 if grep -q "third-org" "$T_STAMP/README.md"; then fail "new rerun restamped the lab"; fi
+
+T2="$TMP/migrated"
+"$CLI" new migrated "$T2" \
+  --title "Migrated line" \
+  --runtime none \
+  --no-agents \
+  --migration
+[[ -f "$T2/migration-docs/README.md" ]] || fail "migration readme"
+[[ -f "$T2/migration-docs/.gitkeep" ]] || fail "migration gitkeep"
+grep -q 'Back it up somewhere else' "$T2/migration-docs/README.md" || fail "migration disclaimer"
+printf '\nlegacy.pdf\nscans/visit.pdf\n' >>"$T2/migration-docs/.gitkeep"
+"$CLI" new migrated "$T2" \
+  --title "Migrated line" \
+  --runtime none \
+  --no-agents \
+  --migration
+grep -q '!migration-docs/legacy.pdf' "$T2/.gitignore" || fail "gitkeep path"
+grep -q '!migration-docs/scans/visit.pdf' "$T2/.gitignore" || fail "nested gitkeep path"
+[[ "$(grep -c 'BEGIN symproject migration-docs' "$T2/.gitignore")" -eq 1 ]] || fail "duplicate migration block"
+grep -q keep-me "$T2/migration-docs/README.md" && fail "migration readme was not new" || true
+echo keep-me >>"$T2/migration-docs/README.md"
+"$CLI" new migrated "$T2" \
+  --title "Migrated line" \
+  --runtime none \
+  --no-agents \
+  --migration
+grep -q keep-me "$T2/migration-docs/README.md" || fail "migration readme must be kept"
 
 echo OK

@@ -55,6 +55,8 @@ symkit install <outdir> --harness research --role researcher --yes
 
 No `--scaffold` and no `--docs`. Layout is this tool's job. `new` writes `docs/design.md`, `docs/funding/`, `docs/methods/`, and `analysis/`. `--docs` would add `docs/aims.md`, which this layout does not use. If `symkit` is missing, the tree is still written and the install command is printed. `--no-agents` skips the nested install.
 
+`--migration` creates `migration-docs/README.md` and `migration-docs/.gitkeep`. Files dropped there stay on this machine. Back them up elsewhere. To track one file, add its path on its own line in `.gitkeep` and run `new` again with `--migration`. The nested `symkit` install is not passed this flag.
+
 ## Catalog
 
 `catalog.yaml` is the source of truth for shape, runtime, and the default org. Do not hardcode those ids in the scaffolder. Real lab names belong in a copy of `templates/lab.yml`.
@@ -69,6 +71,7 @@ No `--scaffold` and no `--docs`. Layout is this tool's job. `new` writes `docs/d
 | `--lab` | (none) | `lab.yml` overlay on `new` |
 | `--paper` | off | Also write one paper stub during `new` |
 | `--package` | slug with `-` → `_` | Directory under `src/` |
+| `--migration` | off | `migration-docs/` for local legacy files. Dumps stay gitignored |
 
 Later layers override the same destination: shape, then runtime, then org. `--lab` overrides the org vars. `--github-org` overrides the GitHub org from the lab file.
 
