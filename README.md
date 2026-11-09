@@ -99,6 +99,8 @@ Investigators stay in the YAML. The stamped line is `Lab: [Lab name](url), Insti
 
 `symproject set-lab <lab> [project]` replaces the recorded lab line, issue line, and clone URL. It reads `.symproject.yaml` and rewrites `README.md` and `CONTRIBUTING.md`. `--dry-run` prints the replacements and writes nothing. A project stamped with `org: none` has no lab line to replace. `new` leaves files that already exist.
 
+`symproject update [project]` fills files the current catalog adds and refreshes the `migration-docs` block in `.gitignore`. The working directory is the project when you omit the path. It reads `.symproject.yaml` for the project name and org. `--package` names the directory under `src/` when that directory is missing or when `src/` has more than one. Existing files stay as they are, including the lab line. It does not run `git init` or `symkit install`. `--title` applies only to files this run creates; otherwise a new file uses the `#` heading in `README.md`. `--no-migration-docs` skips the gitignore refresh. A lab change stays on `set-lab`.
+
 ## What it writes
 
 `new` writes this tree and runs `git init -b main`. `<package>` is `--package`, or the project name with `-` replaced by `_`. `pyproject.toml` is written for `--runtime uv`. `uv.lock` is written when `uv` is on `PATH`. `.symproject.yaml` records the lab holdings `set-lab` replaces.

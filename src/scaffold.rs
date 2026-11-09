@@ -172,6 +172,69 @@ pub fn scaffold(root: &Path, req: &NewProject) -> Result<()> {
     Ok(())
 }
 
+pub struct UpdateProject {
+    pub outdir: PathBuf,
+    pub title: Option<String>,
+    pub package: Option<String>,
+    pub shape: Option<String>,
+    pub runtime: Option<String>,
+    pub migration_docs: bool,
+}
+
+/// Fill scaffold files that are missing from a project that already has `.symproject.yaml`.
+pub fn update(root: &Path, req: &UpdateProject) -> Result<()> {
+    refuse_kit(root, &req.outdir)?;
+    let sidecar = lab::load_sidecar(&req.outdir.join(".symproject.yaml"))?;
+    if !valid_slug(&sidecar.project_name) {
+        return Err(Error::InvalidProjectName(sidecar.project_name));
+    }
+    let package = package_for(&req.outdir, req.package.as_deref(), &sidecar.project_name)?;
+    let title = title_for(&req.outdir, &sidecar.project_name, req.title.as_deref());
+    let runtime = runtime_for(&req.outdir, req.runtime.as_deref());
+
+    let template_dir = root.join("templates");
+    if !template_dir.is_dir() {
+        return Err(Error::TemplatesMissing(template_dir));
+    }
+    let catalog = Catalog::load(&root.join("catalog.yaml"))?;
+    let (shape, runtime, org) = catalog.apply_preset(None, req.shape.as_deref(), Some(&runtime), Some(&sidecar.org))?;
+    let resolved = catalog.resolve(Resolve {
+        shape: &shape,
+        runtime: &runtime,
+        org: &org,
+        github_org: None,
+        project_name: &sidecar.project_name,
+    })?;
+
+    let mut vars = resolved.vars.clone();
+    for (key, value) in &sidecar.holdings {
+        vars.insert(key.clone(), value.clone());
+    }
+    vars.insert("PROJECT_NAME".to_string(), sidecar.project_name.clone());
+    vars.insert("PROJECT_TITLE".to_string(), title.clone());
+    vars.insert("PACKAGE".to_string(), package);
+
+    log(&format!("Updating {}", sidecar.project_name));
+    log(&format!("Destination: {}", req.outdir.display()));
+    log(&format!(
+        "Catalog: shape={} runtime={} org={}",
+        resolved.shape, resolved.runtime, resolved.org
+    ));
+
+    let (mut created, mut skipped) = apply_tree(&template_dir, &req.outdir, &resolved.dirs, &resolved.items, &vars)?;
+    if req.migration_docs {
+        write_migration(&template_dir, &req.outdir, &mut created, &mut skipped)?;
+    } else {
+        log("migration-docs: skipped (--no-migration-docs)");
+    }
+    if resolved.runtime == "uv" {
+        maybe_uv_lock(&req.outdir, &mut created, &mut skipped)?;
+    }
+    log(&format!("Tree: created={created} skipped={skipped}"));
+    log("Existing files were left in place. set-lab changes the lab line.");
+    Ok(())
+}
+
 pub fn create_lab(root: &Path, dest: &Path) -> Result<PathBuf> {
     let src = root.join("templates/lab.yml");
     if !src.is_file() {
@@ -368,6 +431,80 @@ pub(crate) fn valid_slug(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn package_for(outdir: &Path, flag: Option<&str>, project_name: &str) -> Result<String> {
+    if let Some(name) = flag.map(str::trim).filter(|name| !name.is_empty()) {
+        if !valid_package(name) {
+            return Err(Error::InvalidPackageName(name.to_string()));
+        }
+        return Ok(name.to_string());
+    }
+    let mut found = Vec::new();
+    let src = outdir.join("src");
+    if src.is_dir() {
+        for entry in fs::read_dir(&src)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "__pycache__" {
+                continue;
+            }
+            found.push(name.into_owned());
+        }
+    }
+    found.sort();
+    match found.as_slice() {
+        [one] => {
+            if !valid_package(one) {
+                return Err(Error::InvalidPackageName(one.clone()));
+            }
+            Ok(one.clone())
+        }
+        [] => {
+            let derived = project_name.replace('-', "_");
+            if !valid_package(&derived) {
+                return Err(Error::PackageNeedsFlag(project_name.to_string()));
+            }
+            Ok(derived)
+        }
+        many => Err(Error::Msg(format!(
+            "src/ has more than one package ({}); pass --package",
+            many.join(", ")
+        ))),
+    }
+}
+
+fn title_for(outdir: &Path, project_name: &str, flag: Option<&str>) -> String {
+    if let Some(title) = flag.map(str::trim).filter(|title| !title.is_empty()) {
+        return title.to_string();
+    }
+    if let Ok(text) = fs::read_to_string(outdir.join("README.md")) {
+        for line in text.lines() {
+            let Some(rest) = line.strip_prefix("# ") else {
+                continue;
+            };
+            let title = rest.trim().trim_start_matches('#').trim();
+            if !title.is_empty() {
+                return title.to_string();
+            }
+        }
+    }
+    project_name.to_string()
+}
+
+fn runtime_for(outdir: &Path, flag: Option<&str>) -> String {
+    if let Some(name) = flag.map(str::trim).filter(|name| !name.is_empty()) {
+        return name.to_string();
+    }
+    if outdir.join("pyproject.toml").is_file() {
+        "uv".to_string()
+    } else {
+        "none".to_string()
+    }
 }
 
 pub(crate) fn valid_package(name: &str) -> bool {
@@ -1197,6 +1334,88 @@ mod tests {
     #[test]
     fn set_lab_refuses_the_kit_root() {
         let err = set_lab(&kit(), &kit().join("templates/lab.yml"), false).unwrap_err();
+        assert!(err.to_string().contains("refusing to write"), "{err}");
+    }
+
+    fn update_req(outdir: PathBuf) -> UpdateProject {
+        UpdateProject {
+            outdir,
+            title: None,
+            package: None,
+            shape: None,
+            runtime: None,
+            migration_docs: true,
+        }
+    }
+
+    #[test]
+    fn update_restores_missing_files_and_keeps_the_lab_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("demo-study");
+        let mut req = new_req(out.clone(), "demo-study", "none");
+        req.org = Some("lab".to_string());
+        scaffold(&kit(), &req).unwrap();
+        let lab = write_lab(
+            tmp.path(),
+            "other-org",
+            "Other Lab",
+            "https://other.example",
+            "Tickets live in the lab tracker.",
+        );
+        set_lab(&out, &lab, false).unwrap();
+        let readme = fs::read_to_string(out.join("README.md")).unwrap();
+        let sidecar = fs::read_to_string(out.join(".symproject.yaml")).unwrap();
+        fs::remove_file(out.join("docs/design.md")).unwrap();
+        fs::remove_file(out.join("CONTRIBUTING.md")).unwrap();
+        let mut keep = fs::read_to_string(out.join("migration-docs/.gitkeep")).unwrap();
+        keep.push_str("legacy.pdf\n");
+        fs::write(out.join("migration-docs/.gitkeep"), keep).unwrap();
+
+        update(&kit(), &update_req(out.clone())).unwrap();
+
+        assert!(out.join("docs/design.md").is_file());
+        let contributing = fs::read_to_string(out.join("CONTRIBUTING.md")).unwrap();
+        assert!(
+            contributing.contains("Tickets live in the lab tracker."),
+            "{contributing}"
+        );
+        assert_eq!(fs::read_to_string(out.join("README.md")).unwrap(), readme);
+        assert_eq!(fs::read_to_string(out.join(".symproject.yaml")).unwrap(), sidecar);
+        assert!(!out.join("pyproject.toml").exists());
+        let gitignore = fs::read_to_string(out.join(".gitignore")).unwrap();
+        assert!(gitignore.contains("!migration-docs/legacy.pdf"), "{gitignore}");
+        let branch = Command::new("git")
+            .arg("-C")
+            .arg(&out)
+            .arg("branch")
+            .arg("--show-current")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(branch.stdout).unwrap().trim(), "main");
+    }
+
+    #[test]
+    fn update_requires_a_sidecar_and_one_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = update(&kit(), &update_req(tmp.path().to_path_buf())).unwrap_err();
+        assert!(err.to_string().contains(".symproject.yaml"), "{err}");
+
+        let out = tmp.path().join("demo-study");
+        scaffold(&kit(), &new_req(out.clone(), "demo-study", "none")).unwrap();
+        fs::create_dir(out.join("src/other_pkg")).unwrap();
+        let err = update(&kit(), &update_req(out.clone())).unwrap_err();
+        assert!(err.to_string().contains("pass --package"), "{err}");
+
+        let mut req = update_req(out.clone());
+        req.package = Some("other_pkg".to_string());
+        req.migration_docs = false;
+        fs::remove_file(out.join("docs/design.md")).unwrap();
+        let gitignore = fs::read_to_string(out.join(".gitignore")).unwrap();
+        update(&kit(), &req).unwrap();
+        assert!(out.join("docs/design.md").is_file());
+        assert_eq!(fs::read_to_string(out.join(".gitignore")).unwrap(), gitignore);
+
+        let err = update(&kit(), &update_req(kit())).unwrap_err();
         assert!(err.to_string().contains("refusing to write"), "{err}");
     }
 }

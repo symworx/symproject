@@ -114,6 +114,12 @@ grep -q "github.com/third-org/demo-study" "$T1/README.md" || fail "second set-la
 grep -F -q "Lab: [Third Lab](https://third.example)." "$T1/README.md" || fail "second lab line"
 if grep -q "other-org" "$T1/README.md"; then fail "first lab remains"; fi
 
+rm -f "$T1/docs/design.md"
+"$CLI" update "$T1"
+[[ -f "$T1/docs/design.md" ]] || fail "update restores a missing file"
+grep -F -q "Lab: [Third Lab](https://third.example)." "$T1/README.md" || fail "update rewrote the lab line"
+if "$CLI" update "$TMP" >/dev/null 2>&1; then fail "update requires .symproject.yaml"; fi
+
 "$CLI" create lab "$TMP/lab-created.yml"
 grep -q 'github_org: lab-org' "$TMP/lab-created.yml" || fail "create lab template"
 "$CLI" create lab "$TMP/lab-created.yml"

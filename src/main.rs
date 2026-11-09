@@ -54,6 +54,8 @@ enum Command {
     Paper(Box<PaperArgs>),
     /// Replace the lab line, issue line, and clone URL from a lab.yml file
     SetLab(Box<SetLabArgs>),
+    /// Fill missing scaffold files in an existing project
+    Update(Box<UpdateArgs>),
     /// Write a lab file. Shortcut for the new choice in `labs`
     #[command(hide = true)]
     Create(CreateArgs),
@@ -220,6 +222,27 @@ struct SetLabArgs {
 }
 
 #[derive(Args)]
+struct UpdateArgs {
+    /// Project root (default: working directory)
+    outdir: Option<PathBuf>,
+    /// Title for files this run creates. Defaults to the README heading
+    #[arg(long)]
+    title: Option<String>,
+    /// Import package under src/ when it is missing or src/ has more than one
+    #[arg(long)]
+    package: Option<String>,
+    /// Folder spine (default from catalog)
+    #[arg(long)]
+    shape: Option<String>,
+    /// Language runtime stubs: none or uv. Defaults to uv when pyproject.toml exists
+    #[arg(long)]
+    runtime: Option<String>,
+    /// Do not refresh migration-docs/ .gitkeep exceptions
+    #[arg(long = "no-migration-docs")]
+    no_migration_docs: bool,
+}
+
+#[derive(Args)]
 struct PaperArgs {
     /// Paper slug, e.g. multirate-fusion
     slug: String,
@@ -302,6 +325,24 @@ fn run() -> Result<()> {
             };
             let lab_file = symproject::labs::resolve_lab_arg(&args.lab_file);
             scaffold::set_lab(&outdir, &lab_file, args.dry_run)
+        }
+        Some(Command::Update(args)) => {
+            let root = find_root()?;
+            let outdir = match args.outdir {
+                Some(path) => path,
+                None => env::current_dir()?,
+            };
+            scaffold::update(
+                &root,
+                &scaffold::UpdateProject {
+                    outdir,
+                    title: args.title,
+                    package: args.package,
+                    shape: args.shape,
+                    runtime: args.runtime,
+                    migration_docs: !args.no_migration_docs,
+                },
+            )
         }
         Some(Command::Create(args)) => {
             let root = find_root()?;
